@@ -8,4 +8,4 @@ JAR used by [Ptarmigan](https://github.com/nayutaco/ptarmigan)
 gradle build
 ```
 
-generate `bitcoinj-ptarmigan/build/libs/bitcoinj-ptarmigan.jar`.
+generate `build/libs/bitcoinj-ptarmigan.jar`.
