@@ -1,0 +1,31 @@
+apply plugin: 'java'
+apply plugin: 'application'
+compileJava.options.encoding = 'UTF-8'
+
+mainClassName = 'Main'
+def executableBaseName = "bitcoinj-ptarmigan"
+
+repositories {
+    jcenter()
+    mavenCentral()
+}
+
+dependencies {
+    compile group: 'org.bitcoinj', name: 'bitcoinj-core', version: '0.15.1'
+    compile group: 'org.slf4j', name: 'slf4j-simple', version: '1.7.26'
+    compile group: 'org.bouncycastle', name: 'bcprov-jdk15on', version: '1.61'
+    compile 'com.squareup.moshi:moshi:1.8.0'
+}
+
+sourceSets.main.java.srcDirs = ['src']
+
+jar {
+    archiveName = "${executableBaseName}.jar"
+    exclude 'META-INF/*.RSA', 'META-INF/*.SF','META-INF/*.DSA'
+    manifest {
+        attributes ('Main-Class': mainClassName,
+                'Class-Path': configurations.runtime.files.collect { it.name }.join(' ')
+        )
+    }
+    from configurations.compile.collect {it.isDirectory() ? it : zipTree(it)}
+}
