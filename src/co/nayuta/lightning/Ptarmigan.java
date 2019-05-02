@@ -39,7 +39,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
     static public final int SPV_START_BJ = 2;
     static public final int SPV_START_ERR = 3;
     //
-    static private final long TIMEOUT_START = 30000;        //msec
+    static private final long TIMEOUT_START = 60;           //min
     static private final long TIMEOUT_SENDTX = 10000;       //msec
     static private final long TIMEOUT_GET = 30000;          //msec
     //
@@ -208,7 +208,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             logger.debug("  startAsync()");
             wak.startAsync();
             logger.debug("  awaitRunning()");
-            wak.awaitRunning(TIMEOUT_START, TimeUnit.MILLISECONDS);
+            wak.awaitRunning(TIMEOUT_START, TimeUnit.MINUTES);
             //wak.awaitRunning();
 
             logger.info("  balance=" + wak.wallet().getBalance().toFriendlyString());
