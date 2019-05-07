@@ -454,11 +454,19 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         return txs;
     }
     // funding_txを作成
-    public byte[] signRawTx(long amount, byte[] scriptPubKey) {
+    public byte[] signRawTx(long amount, byte[] scriptPubKey, long feeRatePerKb) {
         try {
+            logger.debug("signRawTx(): amount=" + amount);
+            logger.debug("signRawTx(): feeRatePerKb=" + feeRatePerKb);
             SegwitAddress address = SegwitAddress.fromHash(params, scriptPubKey);
             Coin coin = Coin.valueOf(amount);
-            return wak.wallet().createSend(address, coin).bitcoinSerialize();
+            //return wak.wallet().createSend(address, coin).bitcoinSerialize();
+
+            SendRequest req = SendRequest.to(address, coin);
+            req.feePerKb = Coin.valueOf(feeRatePerKb);
+            wak.wallet().completeTx(req);
+            return req.tx.bitcoinSerialize();
+
         } catch (Exception e) {
             e.printStackTrace();
             logger.warn("exception: " + e.getMessage());
@@ -615,7 +623,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             return "fail";
         }
     }
-    // 指定したtx/voutのamount取得
+    // feerate per 1000byte
     public long estimateFee() {
         long returnFeeKb = 0;
         JsonInterface jsonInterface;
