@@ -454,13 +454,13 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         return txs;
     }
     // funding_txを作成
-    public byte[] signRawTx(long amount, byte[] scriptPubKey, long feeRatePerKb) {
+    public byte[] signRawTx(long amount, byte[] scriptPubKey) {
         try {
+            long feeRatePerKb = estimateFee();
             logger.debug("signRawTx(): amount=" + amount);
             logger.debug("signRawTx(): feeRatePerKb=" + feeRatePerKb);
             SegwitAddress address = SegwitAddress.fromHash(params, scriptPubKey);
             Coin coin = Coin.valueOf(amount);
-            //return wak.wallet().createSend(address, coin).bitcoinSerialize();
 
             SendRequest req = SendRequest.to(address, coin);
             req.feePerKb = Coin.valueOf(feeRatePerKb);

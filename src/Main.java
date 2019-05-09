@@ -36,7 +36,7 @@ public class Main
         dummyHash = ptarm.getTxidFromShortChannelId(0);
         dummyBytes = ptarm.searchOutPoint(0, dummyBytes, 0);
         listDummy = ptarm.searchVout(0, new ArrayList<byte[]>());
-        dummyBytes = ptarm.signRawTx(0, dummyBytes, 0);
+        dummyBytes = ptarm.signRawTx(0, dummyBytes);
         dummyBytes = ptarm.sendRawTx(dummyBytes);
         dummyBool = ptarm.checkBroadcast(dummyBytes);
         dummyInt = ptarm.checkUnspent(dummyBytes, dummyBytes, 0);
