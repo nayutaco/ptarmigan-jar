@@ -1,5 +1,6 @@
 package co.nayuta.lightning;
 
+import com.google.common.util.concurrent.Service;
 import com.squareup.moshi.JsonAdapter;
 import com.squareup.moshi.Moshi;
 import org.bitcoinj.core.*;
@@ -39,7 +40,8 @@ public class Ptarmigan implements PtarmiganListenerInterface {
     static public final int SPV_START_BJ = 2;
     static public final int SPV_START_ERR = 3;
     //
-    static private final long TIMEOUT_START = 60;           //min
+    static private final int TIMEOUT_RETRY = 2;
+    static private final long TIMEOUT_START = 30;           //sec
     static private final long TIMEOUT_SENDTX = 10000;       //msec
     static private final long TIMEOUT_GET = 30000;          //msec
     //
@@ -50,6 +52,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
     private HashMap<String, PtarmiganChannel> mapChannel = new HashMap<>();
     private Sha256Hash creationHash;
     private Logger logger;
+    private int blockHeight;
 
     public class ShortChannelParam {
         int height;
@@ -163,67 +166,114 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         }
     }
 
-    public Ptarmigan(String pmtProtocolId) {
+    public Ptarmigan() {
         logger = LoggerFactory.getLogger(this.getClass());
 
         logger.info("bitcoinj " + VersionMessage.BITCOINJ_VERSION);
-        logger.info("Ptarmigan ctor: " + pmtProtocolId);
+    }
+    //
+    public int spv_start(String pmtProtocolId) {
+        logger.info("spv_start: " + pmtProtocolId);
         params = NetworkParameters.fromPmtProtocolID(pmtProtocolId);
         if (params == null) {
             // Error
             logger.error("ERROR: Invalid PmtProtocolID -> $pmtProtocolId");
-            return;
+            return SPV_START_ERR;
         }
-        wak = new WalletAppKit(params,
-                Script.ScriptType.P2WPKH,
-                KeyChainGroupStructure.DEFAULT,
-                new File("./wallet" + pmtProtocolId), "ptarm_p2wpkh") {
-            @Override
-            protected void onSetupCompleted() {
-                logger.debug("onSetupCompleted");
-                if (!pmtProtocolId.equals(NetworkParameters.PAYMENT_PROTOCOL_ID_REGTEST)) {
-                    peerGroup().setUseLocalhostPeerWhenPossible(false);
-                }
-                logger.debug("onSetupCompleted - exit");
-            }
-        };
-    }
-    //
-    public int spv_start() {
-        logger.info("SPV start");
+
         try {
+            logger.debug("spv_start: start WalletAppKit");
+            wak = new WalletAppKit(params,
+                    Script.ScriptType.P2WPKH,
+                    KeyChainGroupStructure.DEFAULT,
+                    new File("./wallet" + pmtProtocolId), "ptarm_p2wpkh") {
+                @Override
+                protected void onSetupCompleted() {
+                    logger.debug("spv_start: onSetupCompleted");
+                    if (!pmtProtocolId.equals(NetworkParameters.PAYMENT_PROTOCOL_ID_REGTEST)) {
+                        peerGroup().setUseLocalhostPeerWhenPossible(false);
+                    }
+                    logger.debug("spv_start: onSetupCompleted - exit");
+                    blockHeight = wak.wallet().getLastBlockSeenHeight();
+                    System.out.print("\nbegin block download");
+                    if (blockHeight != -1) {
+                        System.out.print("(" + blockHeight + ")" );
+                    }
+                }
+            };
             if (wak.isChainFileLocked()) {
-                logger.error("already running");
+                logger.error("spv_start: already running");
                 return SPV_START_FILE;
             }
+            logger.debug("spv_start: startAsync()");
+            wak.startAsync();
         } catch (IOException e) {
-            logger.error("exception: " + e.getMessage());
+            logger.error("spv_start: IOException: " + e.getMessage());
             e.printStackTrace();
             return SPV_START_ERR;
         }
 
         int ret = SPV_START_BJ;
-        try {
-            logger.error("Service state0: " + wak.state().toString());
-            logger.debug("  startAsync()");
-            wak.startAsync();
-            logger.debug("  awaitRunning()");
-            wak.awaitRunning(TIMEOUT_START, TimeUnit.MINUTES);
-            //wak.awaitRunning();
+        int retry = TIMEOUT_RETRY;
+        while (true) {
+            try {
+                wak.awaitRunning(TIMEOUT_START, TimeUnit.SECONDS);
+                blockHeight = wak.wallet().getLastBlockSeenHeight();
 
-            logger.info("  balance=" + wak.wallet().getBalance().toFriendlyString());
-            logger.debug("  end");
-            setCallbackFunctions();
-            ret = SPV_START_OK;
-        } catch (Exception e) {
-            logger.error("exception: " + e.getMessage());
-            logger.error("Service state1: " + wak.state().toString());
-            wak.stopAsync();
-            logger.error("Service state2: " + wak.state().toString());
-            //wak.awaitTerminated();    //戻ってこない
+                logger.info("spv_start: balance=" + wak.wallet().getBalance().toFriendlyString());
+                logger.info("spv_start: block height=" + blockHeight);
+                setCallbackFunctions();
+                ret = SPV_START_OK;
+                break;
+            } catch (TimeoutException e) {
+                logger.error("spv_start: TimeoutException: " + e.getMessage());
+                logger.error("  " + getStackTrace(e));
+
+                int nowHeight = wak.wallet().getLastBlockSeenHeight();
+                logger.debug("spv_start: height=" + nowHeight);
+                logger.debug("spv_start: status=" + wak.state().toString());
+
+                if (blockHeight < nowHeight) {
+                    logger.info("spv_start: block downloading:" + nowHeight);
+                    System.out.print("\n   block downloading(" + nowHeight + ") ");
+                    retry = TIMEOUT_RETRY;
+                } else {
+                    retry--;
+                    if (retry <= 0) {
+                        logger.error("spv_start: retry out");
+                        ret = SPV_START_BJ;
+                        break;
+                    } else {
+                        System.err.println("\nfail download. retry..");
+                    }
+                }
+                blockHeight = nowHeight;
+            } catch (Exception e) {
+                logger.error("Exception: " + e.getMessage());
+                logger.error("  " + getStackTrace(e));
+                ret = SPV_START_ERR;
+                break;
+            }
         }
-        logger.info("SPV start - exit");
+
+        logger.info("spv_start - exit");
+        if (ret == SPV_START_OK) {
+            System.out.println("\nblock downloaded(" + blockHeight + ")");
+        } else {
+            System.err.println("fail: bitcoinj start");
+        }
         return ret;
+    }
+    //
+    private static String getStackTrace(Exception exception) {
+        String returnValue = "";
+        try (StringWriter error = new StringWriter()) {
+            exception.printStackTrace(new PrintWriter(error));
+            returnValue = error.toString();
+        } catch (IOException ex) {
+            ex.printStackTrace();
+        }
+        return returnValue;
     }
     //
     public void setCreationHash(byte[] blockHash) {
@@ -233,9 +283,9 @@ public class Ptarmigan implements PtarmiganListenerInterface {
     //
     public int getBlockCount(byte[] blockHash) {
         logger.debug("getBlockCount()");
-        int cnt = wak.chain().getBestChainHeight();
+        blockHeight = wak.wallet().getLastBlockSeenHeight();
         Sha256Hash bhash = wak.wallet().getLastBlockSeenHash();
-        logger.debug("  count=" + cnt);
+        logger.debug("  count=" + blockHeight);
         if (blockHash != null) {
             byte[] bhashBytes;
             if (bhash != null) {
@@ -247,7 +297,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             }
             System.arraycopy(bhashBytes, 0, blockHash, 0, bhashBytes.length);
         }
-        return cnt;
+        return blockHeight;
     }
     // genesis block hash取得
     public byte[] getGenesisBlockHash() {
@@ -311,7 +361,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         if (blockHash == null) {
             return 0;
         }
-        int height = wak.wallet().getLastBlockSeenHeight();
+        blockHeight = wak.wallet().getLastBlockSeenHeight();
         int c = 0;
         while (true) {
             Block block = getBlockEasy(blockHash);
@@ -325,7 +375,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                 for (Transaction tx0 : txs) {
                     if (tx0.getTxId().equals(txHash)) {
                         if (channel != null) {
-                            channel.setMinedBlock(blockHash, height - c, bindex);
+                            channel.setMinedBlock(blockHash, blockHeight - c, bindex);
                             channel.setConfirmation(c + 1);
                             mapChannel.put(Hex.toHexString(channel.peerNodeId()), channel);
                             logger.debug("   update: conf=" + channel.getConfirmation());
@@ -333,7 +383,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                         logger.debug("getTxConfirmationFromBlock: conf=" + (c + 1));
                         logger.debug("  *bhash=" + block.getHash().toString());
                         logger.debug("  *bindex=" + bindex);
-                        logger.debug("  *height=" + (height - c));
+                        logger.debug("  *height=" + (blockHeight - c));
                         logger.debug("  ***" + tx0.toString());
                         return c + 1;
                     }
@@ -688,20 +738,20 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             e.printStackTrace();
             logger.warn("exception: " + e.getMessage());
         }
-        int blockCnt = wak.chain().getBestChainHeight();
+        blockHeight = wak.wallet().getLastBlockSeenHeight();
 
         logger.debug("  shortChannelId=" + shortChannelId);
         logger.debug("  fundingOutpoint=" + fundingOutpoint.toString());
         logger.debug("  scriptPubKey=" + Hex.toHexString(scriptPubKey));
         logger.debug("  minedHash=" + minedBlockHash.toString());
         logger.debug("  minedHeight=" + minedHeight);
-        logger.debug("  blockCount =" + blockCnt);
+        logger.debug("  blockCount =" + blockHeight);
         logger.debug("  lastConfirm=" + lastConfirm);
 
         byte[] txRaw = null;
         if (minedHeight > 0) {
             //lastConfirmは現在のconfirmationと一致している場合があるため +1する
-            txRaw = searchOutPoint(blockCnt - minedHeight + 1 - lastConfirm + 1,
+            txRaw = searchOutPoint(blockHeight - minedHeight + 1 - lastConfirm + 1,
                     fundingOutpoint.getHash().getReversedBytes(), (int)fundingOutpoint.getIndex());
         }
         logger.debug("      " + ((txRaw != null) ? "SPENT" : "UNSPENT"));
@@ -716,7 +766,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         channel.initialize(shortChannelId, fundingOutpoint, (txRaw == null));
         channel.setMinedBlock(minedBlockHash, minedHeight, -1);
         if (minedHeight > 0) {
-            channel.setConfirmation(blockCnt - minedHeight + 1);
+            channel.setConfirmation(blockHeight - minedHeight + 1);
         }
         try {
             SegwitAddress address = SegwitAddress.fromHash(params, scriptPubKey);
@@ -1063,8 +1113,6 @@ public class Ptarmigan implements PtarmiganListenerInterface {
 
             logger.debug("   confidenceEvent(): " + txConf.getTxId().toString() + " conf=" + conf);
             //logger.debug(txConf);
-            logger.debug("    best=" + wak.chain().getBestChainHeight());
-            logger.debug("    last=" + wak.wallet().getLastBlockSeenHeight());
             if (ch.getMinedBlockHash().equals(Sha256Hash.ZERO_HASH)) {
                 Block block = getBlockEasy(blockHash);
                 if (block == null || !block.hasTransactions()) {
@@ -1080,8 +1128,8 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                 for (Transaction tx : txs) {
                     logger.debug("   tx=" + tx.getTxId().toString());
                     if (tx.getTxId().equals(fundingOutpoint.getHash())) {
-                        int height = wak.chain().getBestChainHeight();
-                        ch.setMinedBlock(block.getHash(), height, bindex);
+                        blockHeight = wak.wallet().getLastBlockSeenHeight();
+                        ch.setMinedBlock(block.getHash(), blockHeight, bindex);
                         confFundingTransactionHandler(ch, tx);
                         break;
                     }

@@ -10,8 +10,8 @@ public class Main
 {
     public static void main( String[] argv ) {
         Ptarmigan ptarm = null;
-        ptarm = new Ptarmigan("");
-        ptarm.spv_start();
+        ptarm = new Ptarmigan();
+        ptarm.spv_start("");
 
         int val;
         val = Ptarmigan.CHECKUNSPENT_FAIL;
