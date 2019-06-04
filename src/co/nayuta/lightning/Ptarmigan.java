@@ -393,11 +393,14 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             if (blockHash.equals(creationHash)) {
                 break;
             }
+            if (blockHash.equals(channel.getLastBlockHash())) {
+                break;
+            }
             // ひとつ前のブロック
             blockHash = block.getPrevBlockHash();
             c++;
         }
-        logger.debug("getTxConfirmationFromBlock: fail confirm");
+        logger.error("getTxConfirmationFromBlock: fail confirm");
         return 0;
     }
     // short_channel_id計算用パラメータ取得
@@ -443,7 +446,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             logger.debug("getTxidFromShortChannelId(): get");
             return block.getTransactions().get(shortChannelId.bIndex).getTxId();
         }
-        logger.debug("getTxidFromShortChannelId(): fail");
+        logger.error("getTxidFromShortChannelId(): fail");
         return null;
     }
     // ブロックから特定のoutpoint(txid,vIndex)をINPUT(vin[0])にもつtxを検索
@@ -453,7 +456,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         byte[] result = null;
         Sha256Hash blockHash = wak.wallet().getLastBlockSeenHash();
         if (blockHash == null) {
-            logger.debug("  searchOutPoint(): fail no blockhash");
+            logger.error("  searchOutPoint(): fail no blockhash");
             return null;
         }
         logger.debug("  searchOutPoint(): blockhash=" + blockHash.toString() + ", n=" + n);
@@ -547,7 +550,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             return txl.getTxId().getReversedBytes();
         }
 
-        logger.debug("sendRawTx(): fail");
+        logger.error("sendRawTx(): fail");
         return null;
     }
     // txの展開済みチェック
@@ -716,10 +719,12 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             byte[] txid, int vIndex,
             byte[] scriptPubKey,
             byte[] minedHash,
-            int lastConfirm) {
+            int lastConfirm,
+            byte[]lastHash) {
         logger.debug("setChannel() peerId=" + Hex.toHexString(peerId));
         TransactionOutPoint fundingOutpoint = new TransactionOutPoint(params, vIndex, Sha256Hash.wrapReversed(txid));
         Sha256Hash minedBlockHash = Sha256Hash.wrapReversed(minedHash);
+        Sha256Hash lastBlockHash = Sha256Hash.wrapReversed(lastHash);
         //
         //if (!minedBlockHash.equals(Sha256Hash.ZERO_HASH)) {
         //    if (!blockCache.containsKey(minedBlockHash)) {
@@ -747,6 +752,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         logger.debug("  minedHeight=" + minedHeight);
         logger.debug("  blockCount =" + blockHeight);
         logger.debug("  lastConfirm=" + lastConfirm);
+        logger.debug("  lastHash=" + lastBlockHash.toString());
 
         byte[] txRaw = null;
         if (minedHeight > 0) {
@@ -840,7 +846,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             logger.warn("exception: " + e.getMessage());
             e.printStackTrace();
         }
-        logger.debug("emptyWallet(): fail");
+        logger.error("emptyWallet(): fail");
         return null;
     }
     //-------------------------------------------------------------------------
@@ -946,7 +952,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                 logger.warn("exception: " + e.getMessage());
             }
         }
-        logger.debug("  getBlockEasy() - fail");
+        logger.error("  getBlockEasy() - fail");
         return null;
     }
     // Block順次取得
@@ -958,7 +964,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             try {
                 block = wak.peerGroup().getConnectedPeers().get(0).getBlock(blockHash).get(TIMEOUT_GET, TimeUnit.MILLISECONDS);
             } catch (Exception e) {
-                logger.debug("getBlockDeep(): fail");
+                logger.error("getBlockDeep(): fail");
                 return null;
             }
             // キャッシュ格納
@@ -974,7 +980,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                 break;
             }
         }
-        logger.debug("getBlockDeep(): fail");
+        logger.error("getBlockDeep(): fail");
         return null;
     }
     // Tx取得

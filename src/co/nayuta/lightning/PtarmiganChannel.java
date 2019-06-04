@@ -21,6 +21,7 @@ public class PtarmiganChannel {
     private CommitTxid[] commitTxids = new CommitTxid[Ptarmigan.COMMITTXID_MAX];
     private TransactionOutPoint fundingOutpoint;
     private Sha256Hash minedHash = Sha256Hash.ZERO_HASH;
+    private Sha256Hash lastHash = Sha256Hash.ZERO_HASH;
     private Logger logger;
     //
     PtarmiganChannel(byte[] peerNodeId, Ptarmigan.ShortChannelParam shortChannelId) {
@@ -98,6 +99,14 @@ public class PtarmiganChannel {
     //
     Sha256Hash getMinedBlockHash() {
         return this.minedHash;
+    }
+    //
+    void setLastBlock(Sha256Hash hash) {
+        this.lastHash = hash;
+    }
+    //
+    Sha256Hash getLastBlockHash() {
+        return this.lastHash;
     }
     //
     void setCommitTxid(int index, int commitNum, Sha256Hash txid) {

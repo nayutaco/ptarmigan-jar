@@ -42,7 +42,7 @@ public class Main
         dummyInt = ptarm.checkUnspent(dummyBytes, dummyBytes, 0);
         String dummyAddr = ptarm.getNewAddress();
         dummyLong = ptarm.estimateFee();
-        ptarm.setChannel(dummyBytes, 0, dummyBytes, 0, dummyBytes, dummyBytes, 0);
+        ptarm.setChannel(dummyBytes, 0, dummyBytes, 0, dummyBytes, dummyBytes, 0, dummyBytes);
         ptarm.delChannel(dummyBytes);
         ptarm.setCommitTxid(dummyBytes, 0, 0, null);
         dummyLong = ptarm.getBalance();
