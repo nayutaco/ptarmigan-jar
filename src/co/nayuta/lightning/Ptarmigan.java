@@ -777,6 +777,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             if (minedHeight > 0) {
                 channel.setConfirmation(blockHeight - minedHeight + 1);
             }
+            channel.setLastBlockHash(lastBlockHash);
             try {
                 SegwitAddress address = SegwitAddress.fromHash(params, scriptPubKey);
                 wak.wallet().addWatchedAddress(address);

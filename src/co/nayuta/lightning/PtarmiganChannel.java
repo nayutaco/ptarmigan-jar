@@ -101,7 +101,7 @@ public class PtarmiganChannel {
         return this.minedHash;
     }
     //
-    void setLastBlock(Sha256Hash hash) {
+    void setLastBlockHash(Sha256Hash hash) {
         this.lastHash = hash;
     }
     //
