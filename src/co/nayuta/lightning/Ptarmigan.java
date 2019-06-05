@@ -721,74 +721,78 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             byte[] minedHash,
             int lastConfirm,
             byte[]lastHash) {
-        logger.debug("setChannel() peerId=" + Hex.toHexString(peerId));
-        TransactionOutPoint fundingOutpoint = new TransactionOutPoint(params, vIndex, Sha256Hash.wrapReversed(txid));
-        Sha256Hash minedBlockHash = Sha256Hash.wrapReversed(minedHash);
-        Sha256Hash lastBlockHash = Sha256Hash.wrapReversed(lastHash);
-        //
-        //if (!minedBlockHash.equals(Sha256Hash.ZERO_HASH)) {
-        //    if (!blockCache.containsKey(minedBlockHash)) {
-        //        //cache
-        //        getBlockDeep(minedBlockHash);
-        //    }
-        //}
-        int minedHeight = 0;
         try {
-            BlockStore bs = wak.chain().getBlockStore();
-            StoredBlock sb = bs.get(minedBlockHash);
-            if (sb != null) {
-                minedHeight = sb.getHeight();
+            logger.debug("setChannel() peerId=" + Hex.toHexString(peerId));
+            TransactionOutPoint fundingOutpoint = new TransactionOutPoint(params, vIndex, Sha256Hash.wrapReversed(txid));
+            Sha256Hash minedBlockHash = Sha256Hash.wrapReversed(minedHash);
+            Sha256Hash lastBlockHash = Sha256Hash.wrapReversed(lastHash);
+            //
+            //if (!minedBlockHash.equals(Sha256Hash.ZERO_HASH)) {
+            //    if (!blockCache.containsKey(minedBlockHash)) {
+            //        //cache
+            //        getBlockDeep(minedBlockHash);
+            //    }
+            //}
+            int minedHeight = 0;
+            try {
+                BlockStore bs = wak.chain().getBlockStore();
+                StoredBlock sb = bs.get(minedBlockHash);
+                if (sb != null) {
+                    minedHeight = sb.getHeight();
+                }
+            } catch (BlockStoreException e) {
+                e.printStackTrace();
+                logger.warn("exception: " + e.getMessage());
             }
-        } catch (BlockStoreException e) {
-            e.printStackTrace();
-            logger.warn("exception: " + e.getMessage());
-        }
-        blockHeight = wak.wallet().getLastBlockSeenHeight();
+            blockHeight = wak.wallet().getLastBlockSeenHeight();
 
-        logger.debug("  shortChannelId=" + shortChannelId);
-        logger.debug("  fundingOutpoint=" + fundingOutpoint.toString());
-        logger.debug("  scriptPubKey=" + Hex.toHexString(scriptPubKey));
-        logger.debug("  minedHash=" + minedBlockHash.toString());
-        logger.debug("  minedHeight=" + minedHeight);
-        logger.debug("  blockCount =" + blockHeight);
-        logger.debug("  lastConfirm=" + lastConfirm);
-        logger.debug("  lastHash=" + lastBlockHash.toString());
+            logger.debug("  shortChannelId=" + shortChannelId);
+            logger.debug("  fundingOutpoint=" + fundingOutpoint.toString());
+            logger.debug("  scriptPubKey=" + Hex.toHexString(scriptPubKey));
+            logger.debug("  minedHash=" + minedBlockHash.toString());
+            logger.debug("  minedHeight=" + minedHeight);
+            logger.debug("  blockCount =" + blockHeight);
+            logger.debug("  lastConfirm=" + lastConfirm);
+            logger.debug("  lastHash=" + lastBlockHash.toString());
 
-        byte[] txRaw = null;
-        if (minedHeight > 0) {
-            //lastConfirmは現在のconfirmationと一致している場合があるため +1する
-            txRaw = searchOutPoint(blockHeight - minedHeight + 1 - lastConfirm + 1,
-                    fundingOutpoint.getHash().getReversedBytes(), (int)fundingOutpoint.getIndex());
-        }
-        logger.debug("      " + ((txRaw != null) ? "SPENT" : "UNSPENT"));
+            byte[] txRaw = null;
+            if (minedHeight > 0) {
+                //lastConfirmは現在のconfirmationと一致している場合があるため +1する
+                txRaw = searchOutPoint(blockHeight - minedHeight + 1 - lastConfirm + 1,
+                        fundingOutpoint.getHash().getReversedBytes(), (int) fundingOutpoint.getIndex());
+            }
+            logger.debug("      " + ((txRaw != null) ? "SPENT" : "UNSPENT"));
 
-        PtarmiganChannel channel = mapChannel.get(Hex.toHexString(peerId));
-        if (channel == null) {
-            logger.debug("    ADD NEW CHANNEL!!");
-            channel = new PtarmiganChannel(peerId, new ShortChannelParam());
-        } else {
-            logger.debug("    change channel settings");
-        }
-        channel.initialize(shortChannelId, fundingOutpoint, (txRaw == null));
-        channel.setMinedBlock(minedBlockHash, minedHeight, -1);
-        if (minedHeight > 0) {
-            channel.setConfirmation(blockHeight - minedHeight + 1);
-        }
-        try {
-            SegwitAddress address = SegwitAddress.fromHash(params, scriptPubKey);
-            wak.wallet().addWatchedAddress(address);
-        } catch (Exception e) {
-            e.getCause().printStackTrace();
-            logger.warn("exception: " + e.getCause().getMessage());
-        }
-        mapChannel.put(Hex.toHexString(channel.peerNodeId()), channel);
-        logger.debug("add channel: " + Hex.toHexString(peerId));
+            PtarmiganChannel channel = mapChannel.get(Hex.toHexString(peerId));
+            if (channel == null) {
+                logger.debug("    ADD NEW CHANNEL!!");
+                channel = new PtarmiganChannel(peerId, new ShortChannelParam());
+            } else {
+                logger.debug("    change channel settings");
+            }
+            channel.initialize(shortChannelId, fundingOutpoint, (txRaw == null));
+            channel.setMinedBlock(minedBlockHash, minedHeight, -1);
+            if (minedHeight > 0) {
+                channel.setConfirmation(blockHeight - minedHeight + 1);
+            }
+            try {
+                SegwitAddress address = SegwitAddress.fromHash(params, scriptPubKey);
+                wak.wallet().addWatchedAddress(address);
+            } catch (Exception e) {
+                e.getCause().printStackTrace();
+                logger.warn("exception: " + e.getCause().getMessage());
+            }
+            mapChannel.put(Hex.toHexString(channel.peerNodeId()), channel);
+            logger.debug("add channel: " + Hex.toHexString(peerId));
 
-        if (!channel.getFundingTxUnspent()) {
-            checkUnspentFromBlock(channel, fundingOutpoint.getHash(), vIndex);
-        }
+            if (!channel.getFundingTxUnspent()) {
+                checkUnspentFromBlock(channel, fundingOutpoint.getHash(), vIndex);
+            }
 
-        debugShowRegisteredChannel();
+            debugShowRegisteredChannel();
+        } catch (Exception ex) {
+            ex.printStackTrace();
+        }
     }
     //
     // チャネル情報削除
