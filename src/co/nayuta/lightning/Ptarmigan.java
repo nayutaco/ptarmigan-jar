@@ -391,9 +391,11 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                 }
             }
             if (blockHash.equals(creationHash)) {
+                logger.debug(" stop by creationHash");
                 break;
             }
             if (blockHash.equals(channel.getLastBlockHash())) {
+                logger.debug(" stop by lastHash");
                 break;
             }
             // ひとつ前のブロック
