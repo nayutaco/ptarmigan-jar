@@ -320,24 +320,6 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         //channelとして保持している場合は、その値を返す
         PtarmiganChannel matchChannel = null;
         for (PtarmiganChannel ch : mapChannel.values()) {
-            //logger.debug("getTxConfirmation():    " + ch.toString());
-            //if (!ch.getMinedBlockHash().equals(Sha256Hash.ZERO_HASH)) {
-            //    //
-            //    BlockStore bs = wak.chain().getBlockStore();
-            //    StoredBlock sb = null;
-            //    try {
-            //        sb = bs.get(ch.getMinedBlockHash());
-            //        logger.debug("height = " + sb.getHeight());
-            //        int conf = bs.getChainHead().getHeight() - sb.getHeight() + 1;
-            //        if (conf > 0) {
-            //            ch.setConfirmation(conf);
-            //            mapChannel.put(Hex.toHexString(ch.peerNodeId), ch);
-            //            return conf;
-            //        }
-            //    } catch (BlockStoreException e) {
-            //        e.printStackTrace();
-            //    }
-            //}
             if ((ch.getFundingOutpoint() != null) && ch.getFundingOutpoint().getHash().equals(txHash)) {
                 if (ch.getConfirmation() >= 0) {
                     logger.debug("getTxConfirmation:   cached conf=" + ch.getConfirmation());
@@ -375,7 +357,6 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                 for (Transaction tx0 : txs) {
                     if (tx0.getTxId().equals(txHash)) {
                         if (channel != null) {
-                            channel.setMinedBlock(blockHash, blockHeight - c, bindex);
                             channel.setConfirmation(c + 1);
                             mapChannel.put(Hex.toHexString(channel.peerNodeId()), channel);
                             logger.debug("   update: conf=" + channel.getConfirmation());
@@ -1126,7 +1107,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
 
             logger.debug("   confidenceEvent(): " + txConf.getTxId().toString() + " conf=" + conf);
             //logger.debug(txConf);
-            if (ch.getMinedBlockHash().equals(Sha256Hash.ZERO_HASH)) {
+            if (ch.getConfirmation() == 0) {
                 Block block = getBlockEasy(blockHash);
                 if (block == null || !block.hasTransactions()) {
                     logger.debug("   no block");
@@ -1143,6 +1124,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                     if (tx.getTxId().equals(fundingOutpoint.getHash())) {
                         blockHeight = wak.wallet().getLastBlockSeenHeight();
                         ch.setMinedBlock(block.getHash(), blockHeight, bindex);
+                        ch.setConfirmation(1);
                         confFundingTransactionHandler(ch, tx);
                         break;
                     }
