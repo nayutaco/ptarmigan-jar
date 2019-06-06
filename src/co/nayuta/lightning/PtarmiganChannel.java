@@ -21,7 +21,6 @@ public class PtarmiganChannel {
     private CommitTxid[] commitTxids = new CommitTxid[Ptarmigan.COMMITTXID_MAX];
     private TransactionOutPoint fundingOutpoint;
     private Sha256Hash minedHash = Sha256Hash.ZERO_HASH;
-    private Sha256Hash lastHash = Sha256Hash.ZERO_HASH;
     private Logger logger;
     //
     PtarmiganChannel(byte[] peerNodeId, Ptarmigan.ShortChannelParam shortChannelId) {
@@ -52,7 +51,10 @@ public class PtarmiganChannel {
     }
     //
     Ptarmigan.ShortChannelParam getShortChannelId() {
-        if ((this.shortChannelId.height != -1) && (this.shortChannelId.bIndex != -1) && (this.shortChannelId.vIndex != -1)) {
+        if ( (this.confirmation > 0) &&
+                (this.shortChannelId.height != -1) &&
+                (this.shortChannelId.bIndex != -1) &&
+                (this.shortChannelId.vIndex != -1) ) {
             return this.shortChannelId;
         } else {
             return null;
@@ -76,22 +78,33 @@ public class PtarmiganChannel {
     }
     //
     void setConfirmation(int conf) {
-        this.confirmation = conf;
-        logger.debug("setConfirmation=" + this.confirmation + "(node=" + Hex.toHexString(this.peerNodeId) + ")");
+        if (conf != 0) {
+            this.confirmation = conf;
+            logger.debug("setConfirmation=" + this.confirmation + "(node=" + Hex.toHexString(this.peerNodeId) + ")");
+        } else {
+            throw new NullPointerException();
+        }
     }
+
+    /**
+     *
+     * @return
+     */
     int getConfirmation() {
         return this.confirmation;
     }
     //
-    void setMinedBlock(Sha256Hash hash, int height, int bIndex) {
+    void setMinedBlockHash(Sha256Hash hash, int height, int bIndex) {
         if ((hash != null) && !hash.equals(Sha256Hash.ZERO_HASH)) {
             this.minedHash = hash;
         }
-        this.shortChannelId.height = height;
+        if (height > 0) {
+            this.shortChannelId.height = height;
+        }
         if (bIndex != -1) {
             this.shortChannelId.bIndex = bIndex;
         }
-        logger.debug("setMinedBlock(node=" + Hex.toHexString(this.peerNodeId) + "):");
+        logger.debug("setMinedBlockHash(node=" + Hex.toHexString(this.peerNodeId) + "):");
         logger.debug("  minedHash=" + this.minedHash.toString());
         logger.debug("  height=" + this.shortChannelId.height);
         logger.debug("  bindex=" + this.shortChannelId.bIndex);
@@ -99,14 +112,6 @@ public class PtarmiganChannel {
     //
     Sha256Hash getMinedBlockHash() {
         return this.minedHash;
-    }
-    //
-    void setLastBlockHash(Sha256Hash hash) {
-        this.lastHash = hash;
-    }
-    //
-    Sha256Hash getLastBlockHash() {
-        return this.lastHash;
     }
     //
     void setCommitTxid(int index, int commitNum, Sha256Hash txid) {

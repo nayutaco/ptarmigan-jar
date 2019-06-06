@@ -1,6 +1,5 @@
 package co.nayuta.lightning;
 
-import com.google.common.util.concurrent.Service;
 import com.squareup.moshi.JsonAdapter;
 import com.squareup.moshi.Moshi;
 import org.bitcoinj.core.*;
@@ -52,7 +51,6 @@ public class Ptarmigan implements PtarmiganListenerInterface {
     private HashMap<String, PtarmiganChannel> mapChannel = new HashMap<>();
     private Sha256Hash creationHash;
     private Logger logger;
-    private int blockHeight;
 
     public class ShortChannelParam {
         int height;
@@ -194,7 +192,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                         peerGroup().setUseLocalhostPeerWhenPossible(false);
                     }
                     logger.debug("spv_start: onSetupCompleted - exit");
-                    blockHeight = wak.wallet().getLastBlockSeenHeight();
+                    int blockHeight = wak.wallet().getLastBlockSeenHeight();
                     System.out.print("\nbegin block download");
                     if (blockHeight != -1) {
                         System.out.print("(" + blockHeight + ")" );
@@ -215,6 +213,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
 
         int ret = SPV_START_BJ;
         int retry = TIMEOUT_RETRY;
+        int blockHeight = 0;
         while (true) {
             try {
                 wak.awaitRunning(TIMEOUT_START, TimeUnit.SECONDS);
@@ -282,12 +281,11 @@ public class Ptarmigan implements PtarmiganListenerInterface {
     }
     //
     public int getBlockCount(byte[] blockHash) {
-        logger.debug("getBlockCount()");
-        blockHeight = wak.wallet().getLastBlockSeenHeight();
-        Sha256Hash bhash = wak.wallet().getLastBlockSeenHash();
-        logger.debug("  count=" + blockHeight);
+        int blockHeight = wak.wallet().getLastBlockSeenHeight();
+        logger.debug("getBlockCount()  count=" + blockHeight);
         if (blockHash != null) {
             byte[] bhashBytes;
+            Sha256Hash bhash = wak.wallet().getLastBlockSeenHash();
             if (bhash != null) {
                 bhashBytes = bhash.getReversedBytes();
                 logger.debug("  hash=" + Hex.toHexString(bhashBytes));
@@ -301,9 +299,8 @@ public class Ptarmigan implements PtarmiganListenerInterface {
     }
     // genesis block hash取得
     public byte[] getGenesisBlockHash() {
-        logger.debug("getGenesisBlockHash()");
         Sha256Hash hash = wak.params().getGenesisBlock().getHash();
-        logger.debug("  hash=" + hash.toString());
+        logger.debug("getGenesisBlockHash()  hash=" + hash.toString());
         return hash.getReversedBytes();
     }
     /** confirmation数取得.
@@ -334,54 +331,56 @@ public class Ptarmigan implements PtarmiganListenerInterface {
     }
     //
     private int getTxConfirmationFromBlock(PtarmiganChannel channel, Sha256Hash txHash) {
-        logger.debug("getTxConfirmationFromBlock(): txid=" + txHash.toString());
-        if (channel != null) {
-            logger.debug("    fundingTxid=" + channel.getFundingOutpoint().toString());
-        }
-
-        Sha256Hash blockHash = wak.wallet().getLastBlockSeenHash();
-        if (blockHash == null) {
-            return 0;
-        }
-        blockHeight = wak.wallet().getLastBlockSeenHeight();
-        int c = 0;
-        while (true) {
-            Block block = getBlockEasy(blockHash);
-            if (block == null) {
-                break;
+        try {
+            logger.debug("getTxConfirmationFromBlock(): txid=" + txHash.toString());
+            if (channel != null) {
+                logger.debug("    fundingTxid=" + channel.getFundingOutpoint().toString());
+            } else {
+                logger.error("getTxConfirmationFromBlock: no channel");
+                return 0;
             }
-            logger.debug("getTxConfirmationFromBlock: blockHash(" + c + ")=" + blockHash.toString());
-            List<Transaction> txs = block.getTransactions();
-            if (txs != null) {
-                int bindex = 0;
-                for (Transaction tx0 : txs) {
-                    if (tx0.getTxId().equals(txHash)) {
-                        if (channel != null) {
+
+            Sha256Hash blockHash = wak.wallet().getLastBlockSeenHash();
+            if (blockHash == null) {
+                return 0;
+            }
+            int blockHeight = wak.wallet().getLastBlockSeenHeight();
+            int c = 0;
+            while (true) {
+                Block block = getBlockEasy(blockHash);
+                if (block == null) {
+                    break;
+                }
+                logger.debug("getTxConfirmationFromBlock: blockHash(" + c + ")=" + blockHash.toString());
+                List<Transaction> txs = block.getTransactions();
+                if (txs != null) {
+                    int bindex = 0;
+                    for (Transaction tx0 : txs) {
+                        if ((tx0 != null) && (tx0.getTxId().equals(txHash))) {
+                            channel.setMinedBlockHash(block.getHash(), blockHeight - c, bindex);
                             channel.setConfirmation(c + 1);
                             mapChannel.put(Hex.toHexString(channel.peerNodeId()), channel);
-                            logger.debug("   update: conf=" + channel.getConfirmation());
+                            logger.debug("getTxConfirmationFromBlock update: conf=" + channel.getConfirmation());
+                            return c + 1;
                         }
-                        logger.debug("getTxConfirmationFromBlock: conf=" + (c + 1));
-                        logger.debug("  *bhash=" + block.getHash().toString());
-                        logger.debug("  *bindex=" + bindex);
-                        logger.debug("  *height=" + (blockHeight - c));
-                        logger.debug("  ***" + tx0.toString());
-                        return c + 1;
+                        bindex++;
                     }
-                    bindex++;
                 }
+                if (blockHash.equals(creationHash)) {
+                    logger.debug(" stop by creationHash");
+                    break;
+                }
+                if (blockHash.equals(channel.getMinedBlockHash())) {
+                    logger.debug(" stop by minedHash");
+                    break;
+                }
+                // ひとつ前のブロック
+                blockHash = block.getPrevBlockHash();
+                c++;
             }
-            if (blockHash.equals(creationHash)) {
-                logger.debug(" stop by creationHash");
-                break;
-            }
-            if (blockHash.equals(channel.getLastBlockHash())) {
-                logger.debug(" stop by lastHash");
-                break;
-            }
-            // ひとつ前のブロック
-            blockHash = block.getPrevBlockHash();
-            c++;
+        } catch (Exception e) {
+            logger.warn("exception: " + e.getMessage());
+            e.printStackTrace();
         }
         logger.error("getTxConfirmationFromBlock: fail confirm");
         return 0;
@@ -391,19 +390,16 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         logger.debug("getShortChannelParam() peerId=" + Hex.toHexString(peerId));
         PtarmiganChannel ch = mapChannel.get(Hex.toHexString(peerId));
         ShortChannelParam param;
-        if ((ch != null) && (ch.getConfirmation() != 0)) {
-            //bindex取得のためブロックから
-            getTxConfirmationFromBlock(ch, ch.getFundingOutpoint().getHash());
-
+        if (ch != null) {
             param = ch.getShortChannelId();
             if (param != null) {
-                param.minedHash = ch.getMinedBlockHash().getReversedBytes();        //JNI戻り値専用
+                param.minedHash = ch.getMinedBlockHash().getReversedBytes();
                 logger.debug("  short_channel_param=" + param.toString());
             } else {
                 logger.debug("  short_channel_param=null");
             }
         } else {
-            logger.debug("  fail: " + ((ch == null) ? "null" : "no short_channel_id"));
+            logger.debug("  fail: no channel");
             param = null;
         }
         return param;
@@ -696,47 +692,61 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         return jsonBuilder.toString();
     }
     // チャネル情報追加
+
+    /**
+     *
+     * @param peerId channel peer node_id
+     * @param shortChannelId short_channel_id
+     * @param txid funding transaction TXID
+     * @param vIndex funding transaction vout
+     * @param scriptPubKey witnessScript
+     * @param blockHashBytes (lastConfirm=0)establish starting blockhash / (lastConfirm>0)mined blockhash
+     * @param lastConfirm last confirmation(==0:establish starting blockhash)
+     */
     public void setChannel(
             byte[] peerId,
             long shortChannelId,
             byte[] txid, int vIndex,
             byte[] scriptPubKey,
-            byte[] minedHash,
-            int lastConfirm,
-            byte[]lastHash) {
+            byte[] blockHashBytes,
+            int lastConfirm) {
         try {
             logger.debug("setChannel() peerId=" + Hex.toHexString(peerId));
             TransactionOutPoint fundingOutpoint = new TransactionOutPoint(params, vIndex, Sha256Hash.wrapReversed(txid));
-            Sha256Hash minedBlockHash = Sha256Hash.wrapReversed(minedHash);
-            Sha256Hash lastBlockHash = Sha256Hash.wrapReversed(lastHash);
+            Sha256Hash blockHash = Sha256Hash.wrapReversed(blockHashBytes);
             //
-            //if (!minedBlockHash.equals(Sha256Hash.ZERO_HASH)) {
-            //    if (!blockCache.containsKey(minedBlockHash)) {
+            //if (!blockHash.equals(Sha256Hash.ZERO_HASH)) {
+            //    if (!blockCache.containsKey(blockHash)) {
             //        //cache
-            //        getBlockDeep(minedBlockHash);
+            //        getBlockDeep(blockHash);
             //    }
             //}
             int minedHeight = 0;
-            try {
-                BlockStore bs = wak.chain().getBlockStore();
-                StoredBlock sb = bs.get(minedBlockHash);
-                if (sb != null) {
-                    minedHeight = sb.getHeight();
+            if (lastConfirm > 0) {
+                try {
+                    BlockStore bs = wak.chain().getBlockStore();
+                    StoredBlock sb = bs.get(blockHash);
+                    if (sb != null) {
+                        minedHeight = sb.getHeight();
+                    }
+                } catch (BlockStoreException e) {
+                    e.printStackTrace();
+                    logger.warn("exception: " + e.getMessage());
                 }
-            } catch (BlockStoreException e) {
-                e.printStackTrace();
-                logger.warn("exception: " + e.getMessage());
             }
-            blockHeight = wak.wallet().getLastBlockSeenHeight();
+            int blockHeight = wak.wallet().getLastBlockSeenHeight();
 
             logger.debug("  shortChannelId=" + shortChannelId);
             logger.debug("  fundingOutpoint=" + fundingOutpoint.toString());
             logger.debug("  scriptPubKey=" + Hex.toHexString(scriptPubKey));
-            logger.debug("  minedHash=" + minedBlockHash.toString());
+            logger.debug("  lastConfirm=" + lastConfirm);
+            if (lastConfirm > 0) {
+                logger.debug("  minedBlockHash=" + blockHash.toString());
+            } else {
+                logger.debug("  establishingBlockHash=" + blockHash.toString());
+            }
             logger.debug("  minedHeight=" + minedHeight);
             logger.debug("  blockCount =" + blockHeight);
-            logger.debug("  lastConfirm=" + lastConfirm);
-            logger.debug("  lastHash=" + lastBlockHash.toString());
 
             byte[] txRaw = null;
             if (minedHeight > 0) {
@@ -754,11 +764,10 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                 logger.debug("    change channel settings");
             }
             channel.initialize(shortChannelId, fundingOutpoint, (txRaw == null));
-            channel.setMinedBlock(minedBlockHash, minedHeight, -1);
+            channel.setMinedBlockHash(blockHash, minedHeight, -1);
             if (minedHeight > 0) {
                 channel.setConfirmation(blockHeight - minedHeight + 1);
             }
-            channel.setLastBlockHash(lastBlockHash);
             try {
                 SegwitAddress address = SegwitAddress.fromHash(params, scriptPubKey);
                 wak.wallet().addWatchedAddress(address);
@@ -852,7 +861,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                     Transaction tx = filteredBlock.getAssociatedTransactions().get(hash);
                     if (tx != null) {
                         logger.debug(tx.toString());
-                        confidenceEvent(tx, filteredBlock.getHash(), true);
+                        blockDownloadEvent(tx, filteredBlock.getHash());
                     }
                 }
             }
@@ -908,13 +917,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             logger.debug("  [CB]KeyChain: -> ");
         });
         wak.wallet().addTransactionConfidenceEventListener((wallet, tx) -> {
-            //miningが複数ブロック行われた場合、その回数だけ呼び出される
-            Sha256Hash hash = wallet.getLastBlockSeenHash();
-            if (hash != null) {
-                logger.debug("  [CB]TransactionConfidence: -> ");
-                logger.debug("    tx: "+tx);
-                confidenceEvent(tx, hash, false);
-            }
+            logger.debug("  [CB]TransactionConfidence: -> " + tx.getTxId());
         });
         wak.wallet().addChangeEventListener(wallet -> {
             logger.debug("  [CB]WalletChange: -> " + wallet.getBalance().toFriendlyString());
@@ -1091,23 +1094,25 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             }
         }
     }
-    // Confidence時処理
-    private void confidenceEvent(Transaction txConf, Sha256Hash blockHash, boolean blockListener) {
-        logger.debug("===== confidenceEvent(tx=" + txConf.getTxId().toString() + ", block=" + blockHash.toString() + ", " + blockListener + ")");
+    //
+    private void blockDownloadEvent(Transaction txConf, Sha256Hash blockHash) {
+        logger.debug("===== blockDownloadEvent(tx=" + txConf.getTxId().toString() + ", block=" + blockHash.toString() + ")");
         int conf = txConf.getConfidence().getDepthInBlocks();
+        if (conf == 0) {
+            logger.debug("  conf=0");
+            return;
+        }
         for (PtarmiganChannel ch : mapChannel.values()) {
             TransactionOutPoint fundingOutpoint = ch.getFundingOutpoint();
             if (fundingOutpoint == null) {
                 continue;
             }
-            logger.debug("   confidenceEvent(): fundingTxid=" + fundingOutpoint.toString());
             if (!fundingOutpoint.getHash().equals(txConf.getTxId())) {
                 continue;
             }
 
-            logger.debug("   confidenceEvent(): " + txConf.getTxId().toString() + " conf=" + conf);
-            //logger.debug(txConf);
-            if (ch.getConfirmation() == 0) {
+            logger.debug("  fundingTxid=" + fundingOutpoint.toString() + " conf=" + conf);
+            if (ch.getConfirmation() <= 0) {
                 Block block = getBlockEasy(blockHash);
                 if (block == null || !block.hasTransactions()) {
                     logger.debug("   no block");
@@ -1120,19 +1125,19 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                     break;
                 }
                 for (Transaction tx : txs) {
-                    logger.debug("   tx=" + tx.getTxId().toString());
-                    if (tx.getTxId().equals(fundingOutpoint.getHash())) {
-                        blockHeight = wak.wallet().getLastBlockSeenHeight();
-                        ch.setMinedBlock(block.getHash(), blockHeight, bindex);
-                        ch.setConfirmation(1);
-                        confFundingTransactionHandler(ch, tx);
-                        break;
+                    if (tx != null) {
+                        logger.debug("   tx=" + tx.getTxId().toString());
+                        if (tx.getTxId().equals(fundingOutpoint.getHash())) {
+                            int blockHeight = txConf.getConfidence().getAppearedAtChainHeight();
+                            logger.debug("@ueno height=" + blockHeight);
+                            ch.setMinedBlockHash(block.getHash(), blockHeight, bindex);
+                            ch.setConfirmation(conf);
+                            confFundingTransactionHandler(ch, tx);
+                            break;
+                        }
                     }
                     bindex++;
                 }
-            }
-            if (!blockListener) {
-                ch.setConfirmation(conf);
             }
 
             mapChannel.put(Hex.toHexString(ch.peerNodeId()), ch);
@@ -1154,7 +1159,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         for (PtarmiganChannel ch : mapChannel.values()) {
             logger.debug("    * " + Hex.toHexString(ch.peerNodeId()));
             TransactionOutPoint fundingOutpoint = ch.getFundingOutpoint();
-            logger.debug("       fund:" + ((fundingOutpoint != null) ? fundingOutpoint.toString() : "no-fundtx") + ":" + ch.getShortChannelId().vIndex);
+            //logger.debug("       fund:" + ((fundingOutpoint != null) ? fundingOutpoint.toString() : "no-fundtx") + ":" + ch.getShortChannelId().vIndex);
         }
         logger.debug("===== debugShowRegisteredChannel: end =====");
     }
