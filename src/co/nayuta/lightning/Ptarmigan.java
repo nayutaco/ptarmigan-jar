@@ -318,10 +318,10 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         PtarmiganChannel matchChannel = null;
         for (PtarmiganChannel ch : mapChannel.values()) {
             if ((ch.getFundingOutpoint() != null) && ch.getFundingOutpoint().getHash().equals(txHash)) {
-                if (ch.getConfirmation() >= 0) {
-                    logger.debug("getTxConfirmation:   cached conf=" + ch.getConfirmation());
-                    return ch.getConfirmation();
-                }
+                //if (ch.getConfirmation() >= 0) {
+                //    logger.debug("getTxConfirmation:   cached conf=" + ch.getConfirmation());
+                //    return ch.getConfirmation();
+                //}
                 matchChannel = ch;
                 break;
             }
@@ -853,7 +853,6 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         logger.info("set callbacks");
         wak.peerGroup().addBlocksDownloadedEventListener((peer, block, filteredBlock, blocksLeft) -> {
             logger.debug("  [CB]BlocksDownloaded: " + block.getHash().toString() + "-> left:" + blocksLeft);
-            int count = 0;
             if (filteredBlock != null) {
                 logger.debug("                    " + filteredBlock.getHash().toString());
                 logger.debug("    txs in filtered block:");
@@ -862,13 +861,9 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                     Transaction tx = filteredBlock.getAssociatedTransactions().get(hash);
                     if (tx != null) {
                         logger.debug(tx.toString());
-                        count++;
                         blockDownloadEvent(tx, filteredBlock.getHash());
                     }
                 }
-            }
-            if (count == 0) {
-                なにかconfirmationを増やす処理がいる
             }
             Optional.ofNullable(block.getTransactions()).ifPresent(txs -> txs.stream().flatMap(tx -> tx.getInputs().stream()).filter(TransactionInput::hasWitness).forEach(txin -> {
                 logger.debug("    tx: " + txin.getParentTransaction().getTxId().toString());
@@ -923,6 +918,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         });
         wak.wallet().addTransactionConfidenceEventListener((wallet, tx) -> {
             logger.debug("  [CB]TransactionConfidence: -> " + tx.getTxId());
+            transactionConfidenceEvent(tx);
         });
         wak.wallet().addChangeEventListener(wallet -> {
             logger.debug("  [CB]WalletChange: -> " + wallet.getBalance().toFriendlyString());
@@ -1100,9 +1096,9 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         }
     }
     //
-    private void blockDownloadEvent(Transaction txConf, Sha256Hash blockHash) {
-        logger.debug("===== blockDownloadEvent(tx=" + txConf.getTxId().toString() + ", block=" + blockHash.toString() + ")");
-        int conf = txConf.getConfidence().getDepthInBlocks();
+    private void blockDownloadEvent(Transaction tx, Sha256Hash blockHash) {
+        logger.debug("===== blockDownloadEvent(tx=" + tx.getTxId().toString() + ", block=" + blockHash.toString() + ")");
+        int conf = tx.getConfidence().getDepthInBlocks();
         if (conf == 0) {
             logger.debug("  conf=0");
             return;
@@ -1112,7 +1108,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             if (fundingOutpoint == null) {
                 continue;
             }
-            if (!fundingOutpoint.getHash().equals(txConf.getTxId())) {
+            if (!fundingOutpoint.getHash().equals(tx.getTxId())) {
                 continue;
             }
 
@@ -1129,15 +1125,14 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                     logger.debug("   no transaction");
                     break;
                 }
-                for (Transaction tx : txs) {
-                    if (tx != null) {
-                        logger.debug("   tx=" + tx.getTxId().toString());
-                        if (tx.getTxId().equals(fundingOutpoint.getHash())) {
-                            int blockHeight = txConf.getConfidence().getAppearedAtChainHeight();
-                            logger.debug("@ueno height=" + blockHeight);
+                for (Transaction txdata : txs) {
+                    if (txdata != null) {
+                        logger.debug("   tx=" + txdata.getTxId().toString());
+                        if (txdata.getTxId().equals(fundingOutpoint.getHash())) {
+                            int blockHeight = txdata.getConfidence().getAppearedAtChainHeight();
                             ch.setMinedBlockHash(block.getHash(), blockHeight, bindex);
                             ch.setConfirmation(conf);
-                            confFundingTransactionHandler(ch, tx);
+                            confFundingTransactionHandler(ch, txdata);
                             break;
                         }
                     }
@@ -1147,6 +1142,28 @@ public class Ptarmigan implements PtarmiganListenerInterface {
 
             mapChannel.put(Hex.toHexString(ch.peerNodeId()), ch);
             logger.debug(" --> " + ch.getConfirmation());
+        }
+    }
+    //
+    private void transactionConfidenceEvent(Transaction tx) {
+        logger.debug("===== transactionConfidenceEvent(tx=" + tx.getTxId().toString() + ", txid=" + tx.getTxId().toString() + ")");
+        int conf = tx.getConfidence().getDepthInBlocks();
+        if (conf == 0) {
+            logger.debug("  conf=0");
+            return;
+        }
+        for (PtarmiganChannel ch : mapChannel.values()) {
+            TransactionOutPoint fundingOutpoint = ch.getFundingOutpoint();
+            if (fundingOutpoint == null) {
+                continue;
+            }
+            if (!fundingOutpoint.getHash().equals(tx.getTxId())) {
+                continue;
+            }
+            ch.setConfirmation(conf);
+            mapChannel.put(Hex.toHexString(ch.peerNodeId()), ch);
+            logger.debug(" --> " + ch.getConfirmation());
+            break;
         }
     }
     // Txのspent登録チェック
