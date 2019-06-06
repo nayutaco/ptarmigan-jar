@@ -853,6 +853,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         logger.info("set callbacks");
         wak.peerGroup().addBlocksDownloadedEventListener((peer, block, filteredBlock, blocksLeft) -> {
             logger.debug("  [CB]BlocksDownloaded: " + block.getHash().toString() + "-> left:" + blocksLeft);
+            int count = 0;
             if (filteredBlock != null) {
                 logger.debug("                    " + filteredBlock.getHash().toString());
                 logger.debug("    txs in filtered block:");
@@ -861,9 +862,13 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                     Transaction tx = filteredBlock.getAssociatedTransactions().get(hash);
                     if (tx != null) {
                         logger.debug(tx.toString());
+                        count++;
                         blockDownloadEvent(tx, filteredBlock.getHash());
                     }
                 }
+            }
+            if (count == 0) {
+                なにかconfirmationを増やす処理がいる
             }
             Optional.ofNullable(block.getTransactions()).ifPresent(txs -> txs.stream().flatMap(tx -> tx.getInputs().stream()).filter(TransactionInput::hasWitness).forEach(txin -> {
                 logger.debug("    tx: " + txin.getParentTransaction().getTxId().toString());
@@ -874,9 +879,9 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         });
         //
         wak.peerGroup().addPreMessageReceivedEventListener(Threading.SAME_THREAD, (peer, m) -> {
+            logger.debug("  [CB]PreMessageReceived: -> ");
             if (m instanceof RejectMessage) {
                 RejectMessage rm = (RejectMessage) m;
-                logger.debug("  [CB]PreMessageReceived: -> ");
                 logger.debug("    reject message: " + rm.getReasonString());
             }
             return m;
