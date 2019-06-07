@@ -207,7 +207,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             wak.startAsync();
         } catch (IOException e) {
             logger.error("spv_start: IOException: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("  " + getStackTrace(e));
             return SPV_START_ERR;
         }
 
@@ -248,8 +248,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                 }
                 blockHeight = nowHeight;
             } catch (Exception e) {
-                logger.error("Exception: " + e.getMessage());
-                logger.error("  " + getStackTrace(e));
+                logger.error("spv_start: " + getStackTrace(e));
                 ret = SPV_START_ERR;
                 break;
             }
@@ -318,10 +317,13 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         PtarmiganChannel matchChannel = null;
         for (PtarmiganChannel ch : mapChannel.values()) {
             if ((ch.getFundingOutpoint() != null) && ch.getFundingOutpoint().getHash().equals(txHash)) {
-                //if (ch.getConfirmation() >= 0) {
-                //    logger.debug("getTxConfirmation:   cached conf=" + ch.getConfirmation());
-                //    return ch.getConfirmation();
-                //}
+                if (ch.getShortChannelId().height > 0) {
+                    int conf = wak.wallet().getLastBlockSeenHeight() - ch.getShortChannelId().height;
+                    ch.setConfirmation(conf);
+                    logger.debug("getTxConfirmation:   cached conf=" + ch.getConfirmation());
+                    mapChannel.put(Hex.toHexString(ch.peerNodeId()), ch);
+                    return ch.getConfirmation();
+                }
                 matchChannel = ch;
                 break;
             }
@@ -361,7 +363,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                             channel.setConfirmation(c + 1);
                             mapChannel.put(Hex.toHexString(channel.peerNodeId()), channel);
                             logger.debug("getTxConfirmationFromBlock update: conf=" + channel.getConfirmation());
-                            return c + 1;
+                            return channel.getConfirmation();
                         }
                         bindex++;
                     }
@@ -379,8 +381,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                 c++;
             }
         } catch (Exception e) {
-            logger.warn("exception: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("getTxConfirmationFromBlock: " + getStackTrace(e));
         }
         logger.error("getTxConfirmationFromBlock: fail confirm");
         return 0;
@@ -500,8 +501,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             return req.tx.bitcoinSerialize();
 
         } catch (Exception e) {
-            e.printStackTrace();
-            logger.warn("exception: " + e.getMessage());
+            logger.error("signRawTx: " + getStackTrace(e));
         }
         return null;
     }
@@ -513,14 +513,8 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             Transaction txret = wak.peerGroup().broadcastTransaction(tx).future().get(TIMEOUT_SENDTX, TimeUnit.MILLISECONDS);
             logger.debug("sendRawTx(): txid=" + txret.getTxId().toString());
             return txret.getTxId().getReversedBytes();
-        } catch (TimeoutException e) {
-            logger.warn("TimeoutException");
-        } catch (ExecutionException e) {
-            logger.warn("ExecutionException: " + e.getCause().getMessage());
-            e.getCause().printStackTrace();
         } catch (Exception e) {
-            logger.warn("exception: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("signRawTx: " + getStackTrace(e));
         }
         //mempool check
         Transaction txl = getPeerMempoolTransaction(tx.getTxId());
@@ -651,7 +645,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             ECKey key = wak.wallet().currentReceiveKey();
             return wak.wallet().currentReceiveAddress().toString();
         } catch (Exception e) {
-            e.printStackTrace();
+            logger.error("getNewAddress: " + getStackTrace(e));
             return "fail";
         }
     }
@@ -730,8 +724,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                         minedHeight = sb.getHeight();
                     }
                 } catch (BlockStoreException e) {
-                    e.printStackTrace();
-                    logger.warn("exception: " + e.getMessage());
+                    logger.error("setChannel 1: " + getStackTrace(e));
                 }
             }
             int blockHeight = wak.wallet().getLastBlockSeenHeight();
@@ -772,8 +765,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                 SegwitAddress address = SegwitAddress.fromHash(params, scriptPubKey);
                 wak.wallet().addWatchedAddress(address);
             } catch (Exception e) {
-                e.getCause().printStackTrace();
-                logger.warn("exception: " + e.getCause().getMessage());
+                logger.error("setChannel 2: " + getStackTrace(e));
             }
             mapChannel.put(Hex.toHexString(channel.peerNodeId()), channel);
             logger.debug("add channel: " + Hex.toHexString(peerId));
@@ -783,8 +775,8 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             }
 
             debugShowRegisteredChannel();
-        } catch (Exception ex) {
-            ex.printStackTrace();
+        } catch (Exception e) {
+            logger.error("setChannel: " + getStackTrace(e));
         }
     }
     //
@@ -834,14 +826,10 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                     return txl.getTxId().getReversedBytes();
                 }
             }
-        } catch (ExecutionException e) {
-            logger.warn("execution: " + e.getCause().getMessage());
-            e.getCause().printStackTrace();
         } catch (Wallet.CouldNotAdjustDownwards e) {
             logger.warn("not enough amount");
         } catch (Exception e) {
-            logger.warn("exception: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("setChannel 1: " + getStackTrace(e));
         }
         logger.error("emptyWallet(): fail");
         return null;
@@ -873,14 +861,14 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             }));
         });
         //
-        wak.peerGroup().addPreMessageReceivedEventListener(Threading.SAME_THREAD, (peer, m) -> {
-            logger.debug("  [CB]PreMessageReceived: -> ");
-            if (m instanceof RejectMessage) {
-                RejectMessage rm = (RejectMessage) m;
-                logger.debug("    reject message: " + rm.getReasonString());
-            }
-            return m;
-        });
+        //wak.peerGroup().addPreMessageReceivedEventListener(Threading.SAME_THREAD, (peer, m) -> {
+        //    logger.debug("  [CB]PreMessageReceived: -> ");
+        //    if (m instanceof RejectMessage) {
+        //        RejectMessage rm = (RejectMessage) m;
+        //        logger.debug("    reject message: " + rm.getReasonString());
+        //    }
+        //    return m;
+        //});
         //commit_txの捕捉に使用できる
         wak.peerGroup().addOnTransactionBroadcastListener((peer, tx) -> {
             logger.debug("  [CB]TransactionBroadcast: -> " + tx.getTxId().toString());
@@ -933,15 +921,19 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             return blockCache.get(blockHash);
         } else {
             try {
-                Block block = wak.peerGroup().getConnectedPeers().get(0).getBlock(blockHash).get(TIMEOUT_GET, TimeUnit.MILLISECONDS);
+                Peer peer = wak.peerGroup().getDownloadPeer();
+                if (peer == null) {
+                    logger.error("  getBlockEasy() - peer not found");
+                    return null;
+                }
+                Block block = peer.getBlock(blockHash).get(TIMEOUT_GET, TimeUnit.MILLISECONDS);
                 if (block != null) {
                     logger.debug("  getBlockEasy() - blockCache2: " + blockHash.toString());
                     blockCache.put(blockHash, block);
                     return block;
                 }
             } catch (Exception e) {
-                e.printStackTrace();
-                logger.warn("exception: " + e.getMessage());
+                logger.error("getBlockEasy(): " + getStackTrace(e));
             }
         }
         logger.error("  getBlockEasy() - fail");
@@ -954,9 +946,14 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         while (true) {
             Block block;
             try {
-                block = wak.peerGroup().getConnectedPeers().get(0).getBlock(blockHash).get(TIMEOUT_GET, TimeUnit.MILLISECONDS);
+                Peer peer = wak.peerGroup().getDownloadPeer();
+                if (peer == null) {
+                    logger.error("  getBlockDeep() - peer not found");
+                    return null;
+                }
+                block = peer.getBlock(blockHash).get(TIMEOUT_GET, TimeUnit.MILLISECONDS);
             } catch (Exception e) {
-                logger.error("getBlockDeep(): fail");
+                logger.error("getBlockDeep(): " + getStackTrace(e));
                 return null;
             }
             // キャッシュ格納
@@ -986,8 +983,14 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         while (true) {
             Block block;
             try {
-                block = wak.peerGroup().getConnectedPeers().get(0).getBlock(blockHash).get(TIMEOUT_GET, TimeUnit.MILLISECONDS);
+                Peer peer = wak.peerGroup().getDownloadPeer();
+                if (peer == null) {
+                    logger.error("  getTransaction() - peer not found");
+                    return null;
+                }
+                block = peer.getBlock(blockHash).get(TIMEOUT_GET, TimeUnit.MILLISECONDS);
             } catch (Exception e) {
+                logger.error("getTransaction(): " + getStackTrace(e));
                 return null;
             }
             List<Transaction> txs = block.getTransactions();
@@ -1013,10 +1016,14 @@ public class Ptarmigan implements PtarmiganListenerInterface {
     // MempoolからTx取得
     private Transaction getPeerMempoolTransaction(Sha256Hash txHash) {
         try {
-            return wak.peerGroup().getConnectedPeers().get(0).getPeerMempoolTransaction(txHash).get(TIMEOUT_GET, TimeUnit.MILLISECONDS);
+            Peer peer = wak.peerGroup().getDownloadPeer();
+            if (peer == null) {
+                logger.error("  getPeerMempoolTransaction() - peer not found");
+                return null;
+            }
+            return peer.getPeerMempoolTransaction(txHash).get(TIMEOUT_GET, TimeUnit.MILLISECONDS);
         } catch (Exception e) {
-            logger.warn("fail: getPeerMempoolTransaction");
-            e.printStackTrace();
+            logger.error("getPeerMempoolTransaction(): " + getStackTrace(e));
         }
         return null;
     }
