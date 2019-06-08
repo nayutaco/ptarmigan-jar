@@ -311,22 +311,27 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         Sha256Hash txHash = Sha256Hash.wrapReversed(txhash);
         logger.debug("getTxConfirmation(): txid=" + txHash.toString());
 
-        //debugShowRegisteredChannel();
+        PtarmiganChannel matchChannel = null;
 
         //channelとして保持している場合は、その値を返す
-        PtarmiganChannel matchChannel = null;
-        for (PtarmiganChannel ch : mapChannel.values()) {
-            if ((ch.getFundingOutpoint() != null) && ch.getFundingOutpoint().getHash().equals(txHash)) {
-                if (ch.getShortChannelId().height > 0) {
-                    int conf = wak.wallet().getLastBlockSeenHeight() - ch.getShortChannelId().height;
-                    ch.setConfirmation(conf);
-                    logger.debug("getTxConfirmation:   cached conf=" + ch.getConfirmation());
-                    mapChannel.put(Hex.toHexString(ch.peerNodeId()), ch);
-                    return ch.getConfirmation();
+        try {
+            for (PtarmiganChannel ch : mapChannel.values()) {
+                if ((ch.getFundingOutpoint() != null) &&
+                        ch.getFundingOutpoint().getHash().equals(txHash) &&
+                        (ch.getShortChannelId() != null)) {
+                    if (ch.getShortChannelId().height > 0) {
+                        int conf = wak.wallet().getLastBlockSeenHeight() - ch.getShortChannelId().height;
+                        ch.setConfirmation(conf);
+                        logger.debug("getTxConfirmation:   cached conf=" + ch.getConfirmation());
+                        mapChannel.put(Hex.toHexString(ch.peerNodeId()), ch);
+                        return ch.getConfirmation();
+                    }
+                    matchChannel = ch;
+                    break;
                 }
-                matchChannel = ch;
-                break;
             }
+        } catch (Exception e) {
+            logger.error("getTxConfirmation(): " + getStackTrace(e));
         }
         logger.debug("fail ---> get from block");
         return getTxConfirmationFromBlock(matchChannel, txHash);
