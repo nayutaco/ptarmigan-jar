@@ -7,7 +7,6 @@ import org.bitcoinj.kits.WalletAppKit;
 import org.bitcoinj.script.Script;
 import org.bitcoinj.store.BlockStore;
 import org.bitcoinj.store.BlockStoreException;
-import org.bitcoinj.utils.Threading;
 import org.bitcoinj.wallet.KeyChainGroupStructure;
 import org.bitcoinj.wallet.SendRequest;
 import org.bitcoinj.wallet.Wallet;
@@ -20,7 +19,6 @@ import java.io.*;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.*;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.IntStream;
@@ -39,10 +37,12 @@ public class Ptarmigan implements PtarmiganListenerInterface {
     static public final int SPV_START_BJ = 2;
     static public final int SPV_START_ERR = 3;
     //
-    static private final int TIMEOUT_RETRY = 2;
-    static private final long TIMEOUT_START = 30;           //sec
+    static private final int TIMEOUT_RETRY = 12;
+    static private final long TIMEOUT_START = 5;            //sec
     static private final long TIMEOUT_SENDTX = 10000;       //msec
     static private final long TIMEOUT_GET = 30000;          //msec
+    //
+    static private final String FILE_STARTUP = "bitcoinj_startup.log";
     //
     private NetworkParameters params;
     private WalletAppKit wak;
@@ -168,6 +168,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         logger = LoggerFactory.getLogger(this.getClass());
 
         logger.info("bitcoinj " + VersionMessage.BITCOINJ_VERSION);
+        saveDownloadLog("begin");
     }
     //
     public int spv_start(String pmtProtocolId) {
@@ -191,12 +192,13 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                     if (!pmtProtocolId.equals(NetworkParameters.PAYMENT_PROTOCOL_ID_REGTEST)) {
                         peerGroup().setUseLocalhostPeerWhenPossible(false);
                     }
-                    logger.debug("spv_start: onSetupCompleted - exit");
                     int blockHeight = wak.wallet().getLastBlockSeenHeight();
                     System.out.print("\nbegin block download");
                     if (blockHeight != -1) {
-                        System.out.print("(" + blockHeight + ")" );
+                        System.out.print("(" + blockHeight + ")");
                     }
+                    saveDownloadLog("download");
+                    logger.debug("spv_start: onSetupCompleted - exit");
                 }
             };
             if (wak.isChainFileLocked()) {
@@ -228,22 +230,29 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                 logger.error("spv_start: TimeoutException: " + e.getMessage());
                 logger.error("  " + getStackTrace(e));
 
-                int nowHeight = wak.wallet().getLastBlockSeenHeight();
-                logger.debug("spv_start: height=" + nowHeight);
-                logger.debug("spv_start: status=" + wak.state().toString());
+                int nowHeight = 0;
+                try {
+                    nowHeight = wak.wallet().getLastBlockSeenHeight();
+                    logger.debug("spv_start: height=" + nowHeight);
+                    logger.debug("spv_start: status=" + wak.state().toString());
+                } catch (Exception e2) {
+                    logger.error("spv_start: fail getLastBlockSeenHeight: " + getStackTrace(e2));
+                }
 
                 if (blockHeight < nowHeight) {
                     logger.info("spv_start: block downloading:" + nowHeight);
                     System.out.print("\n   block downloading(" + nowHeight + ") ");
+                    saveDownloadLog("height=" + nowHeight);
                     retry = TIMEOUT_RETRY;
                 } else {
                     retry--;
                     if (retry <= 0) {
                         logger.error("spv_start: retry out");
+                        System.out.println("fail download.");
                         ret = SPV_START_BJ;
                         break;
                     } else {
-                        System.err.println("\nfail download. retry..");
+                        logger.warn("spv_start: retry blockHeight=" + blockHeight + ", nowHeight=" + nowHeight);
                     }
                 }
                 blockHeight = nowHeight;
@@ -257,8 +266,10 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         logger.info("spv_start - exit");
         if (ret == SPV_START_OK) {
             System.out.println("\nblock downloaded(" + blockHeight + ")");
+            saveDownloadLog("OK");
         } else {
             System.err.println("fail: bitcoinj start");
+            saveDownloadLog("NG");
         }
         return ret;
     }
@@ -919,6 +930,16 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         logger.info("set callbacks: end");
     }
 
+    // save block download logfile
+    private void saveDownloadLog(String str) {
+        try {
+            FileWriter fileWriter = new FileWriter("./logs/" + FILE_STARTUP, false);
+            fileWriter.write(str);
+            fileWriter.close();
+        } catch (IOException e) {
+            logger.error("FileWriter:" + str);
+        }
+    }
     // Block取得
     private Block getBlockEasy(Sha256Hash blockHash) {
         if (blockCache.containsKey(blockHash)) {
