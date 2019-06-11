@@ -331,7 +331,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                         ch.getFundingOutpoint().getHash().equals(txHash) &&
                         (ch.getShortChannelId() != null)) {
                     if (ch.getShortChannelId().height > 0) {
-                        int conf = wak.wallet().getLastBlockSeenHeight() - ch.getShortChannelId().height;
+                        int conf = wak.wallet().getLastBlockSeenHeight() - ch.getShortChannelId().height + 1;
                         ch.setConfirmation(conf);
                         logger.debug("getTxConfirmation:   cached conf=" + ch.getConfirmation());
                         mapChannel.put(Hex.toHexString(ch.peerNodeId()), ch);
