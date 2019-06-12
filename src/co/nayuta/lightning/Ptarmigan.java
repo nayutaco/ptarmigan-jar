@@ -46,7 +46,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
     //
     private NetworkParameters params;
     private WalletAppKit wak;
-    private HashMap<Sha256Hash, Block> blockCache = new HashMap<>();
+    private LinkedHashMap<Sha256Hash, Block> blockCache = new LinkedHashMap<>();
     private HashMap<Sha256Hash, Transaction> txCache = new HashMap<>();
     private HashMap<String, PtarmiganChannel> mapChannel = new HashMap<>();
     private Sha256Hash creationHash;
@@ -60,7 +60,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         //
         //
         ShortChannelParam() {
-            this(0, 0, 0);
+            this(-1, -1, -1);
         }
         ShortChannelParam(int height, int bIndex, int vIndex) {
             this.height = height;
@@ -80,6 +80,10 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                 this.vIndex = (int)(shortChannelId & 0xffff);
             }
             logger.debug("initialize()=" + this.toString());
+        }
+        //
+        boolean isAvailable() {
+            return (this.height > 0) && (this.bIndex > 0) && (this.vIndex >= 0);
         }
         //
         @Override
@@ -121,7 +125,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         public long getFeeratePerKb(Moshi moshi) throws IOException {
             JsonAdapter<JsonParam> jsonAdapter = moshi.adapter(JsonParam.class);
             JsonParam fee = jsonAdapter.fromJson(getFeeJson(this));
-            return fee.hourFee * 1000;
+            return (fee != null) ? fee.hourFee * 1000 : Transaction.DEFAULT_TX_FEE.getValue();
         }
     }
     static class JsonBlockCypher implements JsonInterface {
@@ -149,7 +153,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         public long getFeeratePerKb(Moshi moshi) throws IOException {
             JsonAdapter<JsonParam> jsonAdapter = moshi.adapter(JsonParam.class);
             JsonParam fee = jsonAdapter.fromJson(getFeeJson(this));
-            return fee.medium_fee_per_kb;
+            return (fee != null) ? fee.medium_fee_per_kb : Transaction.DEFAULT_TX_FEE.getValue();
         }
     }
     static class JsonConstantFee implements JsonInterface {
@@ -213,7 +217,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             return SPV_START_ERR;
         }
 
-        int ret = SPV_START_BJ;
+        int ret;
         int retry = TIMEOUT_RETRY;
         int blockHeight = 0;
         while (true) {
@@ -328,9 +332,8 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         try {
             for (PtarmiganChannel ch : mapChannel.values()) {
                 if ((ch.getFundingOutpoint() != null) &&
-                        ch.getFundingOutpoint().getHash().equals(txHash) &&
-                        (ch.getShortChannelId() != null)) {
-                    if (ch.getShortChannelId().height > 0) {
+                        ch.getFundingOutpoint().getHash().equals(txHash)) {
+                    if ((ch.getShortChannelId() != null) && (ch.getShortChannelId().height > 0)) {
                         int conf = wak.wallet().getLastBlockSeenHeight() - ch.getShortChannelId().height + 1;
                         ch.setConfirmation(conf);
                         logger.debug("getTxConfirmation:   cached conf=" + ch.getConfirmation());
@@ -543,14 +546,27 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         return null;
     }
     // txの展開済みチェック
-    public boolean checkBroadcast(byte[] txhash) {
+    public boolean checkBroadcast(byte[] peerId, byte[] txhash) {
         Sha256Hash txHash = Sha256Hash.wrapReversed(txhash);
+
         logger.debug("checkBroadcast(): " + txHash.toString());
+        logger.debug("    peerId=" + Hex.toHexString(peerId));
+
+        if (!mapChannel.containsKey(Hex.toHexString(peerId))) {
+            logger.debug("    unknown peer");
+            return false;
+        }
+        PtarmiganChannel ch = mapChannel.get(Hex.toHexString(peerId));
+
         if (txCache.containsKey(txHash)) {
             logger.debug("  broadcasted(txCache)");
             return true;
         }
-        for (Block block : blockCache.values()) {
+        ArrayList<Sha256Hash> keyList = new ArrayList<>(blockCache.keySet());
+        for (int i = keyList.size() - 1; i >= 0; i--) {
+            Sha256Hash key = keyList.get(i);
+            Block block = blockCache.get(key);
+            logger.debug("checkBroadcast:: block=" + block.getHashAsString());
             List<Transaction> txs = block.getTransactions();
             if (txs == null) {
                 continue;
@@ -560,6 +576,10 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                     logger.debug("  broadcasted(BlockCache)");
                     return true;
                 }
+            }
+            if (block.getHash() == ch.getMinedBlockHash()) {
+                logger.debug("  not broadcasted(mined block)");
+                return false;
             }
         }
         Transaction tx = getTransaction(txHash);
@@ -576,7 +596,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         if (peerId != null) {
             logger.debug("    peerId=" + Hex.toHexString(peerId));
             if (!mapChannel.containsKey(Hex.toHexString(peerId))) {
-                logger.debug("    not peer");
+                logger.debug("    unknown peer");
                 return CHECKUNSPENT_FAIL;
             }
             //
@@ -624,7 +644,10 @@ public class Ptarmigan implements PtarmiganListenerInterface {
     //      blockCacheの各blockからvinをチェックする
     private int checkUnspentFromBlock(PtarmiganChannel ch, Sha256Hash txHash, int vIndex) {
         logger.debug("checkUnspentFromBlock(): txid=" + txHash.toString() + " : " + vIndex);
-        for (Block block : blockCache.values()) {
+        ArrayList<Sha256Hash> keyList = new ArrayList<>(blockCache.keySet());
+        for (int i = keyList.size() - 1; i >= 0; i--) {
+            Sha256Hash key = keyList.get(i);
+            Block block = blockCache.get(key);
             if (block.getTransactions() == null) {
                 continue;
             }
@@ -658,7 +681,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
     // 受信アドレス取得(scriptPubKey)
     public String getNewAddress() {
         try {
-            ECKey key = wak.wallet().currentReceiveKey();
+            wak.wallet().currentReceiveKey();
             return wak.wallet().currentReceiveAddress().toString();
         } catch (Exception e) {
             logger.error("getNewAddress: " + getStackTrace(e));
@@ -667,7 +690,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
     }
     // feerate per 1000byte
     public long estimateFee() {
-        long returnFeeKb = 0;
+        long returnFeeKb;
         JsonInterface jsonInterface;
         Moshi moshi = new Moshi.Builder().build();
         if (NetworkParameters.PAYMENT_PROTOCOL_ID_MAINNET.equals(params.getPaymentProtocolId())) {
@@ -679,7 +702,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         }
         try {
             returnFeeKb = jsonInterface.getFeeratePerKb(moshi);
-        } catch (IOException e) {
+        } catch (Exception e) {
             returnFeeKb = Transaction.DEFAULT_TX_FEE.getValue();
         }
         return returnFeeKb;
@@ -966,38 +989,38 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         return null;
     }
     // Block順次取得
-    private Block getBlockDeep(Sha256Hash searchBlockHash) {
-        logger.debug("getBlockDeep(): " + searchBlockHash.toString());
-        Sha256Hash blockHash = wak.wallet().getLastBlockSeenHash();
-        while (true) {
-            Block block;
-            try {
-                Peer peer = wak.peerGroup().getDownloadPeer();
-                if (peer == null) {
-                    logger.error("  getBlockDeep() - peer not found");
-                    return null;
-                }
-                block = peer.getBlock(blockHash).get(TIMEOUT_GET, TimeUnit.MILLISECONDS);
-            } catch (Exception e) {
-                logger.error("getBlockDeep(): " + getStackTrace(e));
-                return null;
-            }
-            // キャッシュ格納
-            blockCache.put(block.getHash(), block);
-            if (block.getHash().equals(searchBlockHash)) {
-                logger.debug("getBlockDeep(): end");
-                return block;
-            }
-            // ひとつ前のブロック
-            blockHash = block.getPrevBlockHash();
-            //
-            if (blockHash.equals(creationHash)) {
-                break;
-            }
-        }
-        logger.error("getBlockDeep(): fail");
-        return null;
-    }
+    //private Block getBlockDeep(Sha256Hash searchBlockHash) {
+    //    logger.debug("getBlockDeep(): " + searchBlockHash.toString());
+    //    Sha256Hash blockHash = wak.wallet().getLastBlockSeenHash();
+    //    while (true) {
+    //        Block block;
+    //        try {
+    //            Peer peer = wak.peerGroup().getDownloadPeer();
+    //            if (peer == null) {
+    //                logger.error("  getBlockDeep() - peer not found");
+    //                return null;
+    //            }
+    //            block = peer.getBlock(blockHash).get(TIMEOUT_GET, TimeUnit.MILLISECONDS);
+    //        } catch (Exception e) {
+    //            logger.error("getBlockDeep(): " + getStackTrace(e));
+    //            return null;
+    //        }
+    //        // キャッシュ格納
+    //        blockCache.put(block.getHash(), block);
+    //        if (block.getHash().equals(searchBlockHash)) {
+    //            logger.debug("getBlockDeep(): end");
+    //            return block;
+    //        }
+    //        // ひとつ前のブロック
+    //        blockHash = block.getPrevBlockHash();
+    //        //
+    //        if (blockHash.equals(creationHash)) {
+    //            break;
+    //        }
+    //    }
+    //    logger.error("getBlockDeep(): fail");
+    //    return null;
+    //}
     // Tx取得
     private Transaction getTransaction(Sha256Hash txHash) {
         // Tx Cache
@@ -1006,6 +1029,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         }
         // Block
         Sha256Hash blockHash = wak.wallet().getLastBlockSeenHash();
+        long loopCount = Long.MAX_VALUE;
         while (true) {
             Block block;
             try {
@@ -1034,6 +1058,11 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             blockHash = block.getPrevBlockHash();
             //
             if (blockHash.equals(creationHash)) {
+                break;
+            }
+            loopCount--;
+            if (loopCount == 0) {
+                logger.error("getTransaction: too many loop");
                 break;
             }
         }
@@ -1213,7 +1242,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         logger.debug("===== debugShowRegisteredChannel =====");
         for (PtarmiganChannel ch : mapChannel.values()) {
             logger.debug("    * " + Hex.toHexString(ch.peerNodeId()));
-            TransactionOutPoint fundingOutpoint = ch.getFundingOutpoint();
+            //TransactionOutPoint fundingOutpoint = ch.getFundingOutpoint();
             //logger.debug("       fund:" + ((fundingOutpoint != null) ? fundingOutpoint.toString() : "no-fundtx") + ":" + ch.getShortChannelId().vIndex);
         }
         logger.debug("===== debugShowRegisteredChannel: end =====");

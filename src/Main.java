@@ -20,6 +20,10 @@ public class Main
         val = Ptarmigan.COMMITTXID_LOCAL;
         val = Ptarmigan.COMMITTXID_REMOTE;
         val = Ptarmigan.COMMITTXID_MAX;
+        val = Ptarmigan.SPV_START_OK;
+        val = Ptarmigan.SPV_START_FILE;
+        val = Ptarmigan.SPV_START_BJ;
+        val = Ptarmigan.SPV_START_ERR;
 
         int dummyInt = 0;
         byte[] dummyBytes = null;
@@ -28,6 +32,7 @@ public class Main
         List<byte[]> listDummy = null;
         boolean dummyBool = false;
         long dummyLong = 0;
+        dummyInt = ptarm.spv_start("");
         ptarm.setCreationHash(dummyBytes);
         dummyInt = ptarm.getBlockCount(dummyBytes);
         dummyBytes = ptarm.getGenesisBlockHash();
@@ -38,7 +43,7 @@ public class Main
         listDummy = ptarm.searchVout(0, new ArrayList<byte[]>());
         dummyBytes = ptarm.signRawTx(0, dummyBytes);
         dummyBytes = ptarm.sendRawTx(dummyBytes);
-        dummyBool = ptarm.checkBroadcast(dummyBytes);
+        dummyBool = ptarm.checkBroadcast(dummyBytes, dummyBytes);
         dummyInt = ptarm.checkUnspent(dummyBytes, dummyBytes, 0);
         String dummyAddr = ptarm.getNewAddress();
         dummyLong = ptarm.estimateFee();
