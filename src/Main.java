@@ -28,6 +28,7 @@ public class Main
         int dummyInt = 0;
         byte[] dummyBytes = null;
         Ptarmigan.ShortChannelParam dummyChan = null;
+        Ptarmigan.SearchOutPointResult dummySearch = null;
         Sha256Hash dummyHash = null;
         List<byte[]> listDummy = null;
         boolean dummyBool = false;
@@ -39,7 +40,7 @@ public class Main
         dummyInt = ptarm.getTxConfirmation(dummyBytes);
         dummyChan = ptarm.getShortChannelParam(dummyBytes);
         dummyHash = ptarm.getTxidFromShortChannelId(0);
-        dummyBytes = ptarm.searchOutPoint(0, dummyBytes, 0);
+        dummySearch = ptarm.searchOutPoint(0, dummyBytes, 0);
         listDummy = ptarm.searchVout(0, new ArrayList<byte[]>());
         dummyBytes = ptarm.signRawTx(0, dummyBytes);
         dummyBytes = ptarm.sendRawTx(dummyBytes);

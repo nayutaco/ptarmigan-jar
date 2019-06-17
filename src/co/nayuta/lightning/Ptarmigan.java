@@ -91,7 +91,16 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             return String.format("height:%d, bIndex:%d, vIndex:%d", height, bIndex, vIndex);
         }
     }
-
+    public class SearchOutPointResult {
+        int height;
+        byte[] tx;
+        //
+        //
+        SearchOutPointResult() {
+            this.height = 0;
+            tx = null;
+        }
+    }
     interface JsonInterface {
         URL getUrl();
         long getFeeratePerKb(Moshi moshi) throws IOException;
@@ -449,10 +458,10 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         return null;
     }
     // ブロックから特定のoutpoint(txid,vIndex)をINPUT(vin[0])にもつtxを検索
-    public byte[] searchOutPoint(int n, byte[] txhash, int vIndex) {
+    public SearchOutPointResult searchOutPoint(int n, byte[] txhash, int vIndex) {
         Sha256Hash txHash = Sha256Hash.wrapReversed(txhash);
         logger.debug("searchOutPoint(): txid=" + txHash.toString() + ", n=" + n);
-        byte[] result = null;
+        SearchOutPointResult result = new SearchOutPointResult();
         Sha256Hash blockHash = wak.wallet().getLastBlockSeenHash();
         if (blockHash == null) {
             logger.error("  searchOutPoint(): fail no blockhash");
@@ -460,6 +469,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         }
         logger.debug("  searchOutPoint(): blockhash=" + blockHash.toString() + ", n=" + n);
         Sha256Hash resultHash = null;
+        int blockcount = wak.wallet().getLastBlockSeenHeight();
         for (int i = 0; i < n; i++) {
             Block blk = getBlockEasy(blockHash);
             if (blk == null || blk.getTransactions() == null) {
@@ -470,14 +480,16 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             for (Transaction tx : blk.getTransactions()) {
                 TransactionOutPoint outPoint = tx.getInput(0).getOutpoint();
                 if (outPoint.getHash().equals(txHash) && outPoint.getIndex() == vIndex) {
-                    result = tx.bitcoinSerialize();
+                    result.tx = tx.bitcoinSerialize();
+                    result.height = blockcount;
                     resultHash = tx.getTxId();
                     break;
                 }
             }
             blockHash = blk.getPrevBlockHash();
+            blockcount--;
         }
-        logger.debug("searchOutPoint(): result=" + ((result != null) ? resultHash.toString() : "fail"));
+        logger.debug("searchOutPoint(): result=" + ((result.tx != null) ? resultHash.toString() : "fail"));
         return result;
     }
     //
@@ -780,13 +792,15 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             logger.debug("  minedHeight=" + minedHeight);
             logger.debug("  blockCount =" + blockHeight);
 
-            byte[] txRaw = null;
+            SearchOutPointResult resultSearch = null;
             if (minedHeight > 0) {
-                //lastConfirmは現在のconfirmationと一致している場合があるため +1する
-                txRaw = searchOutPoint(blockHeight - minedHeight + 1 - lastConfirm + 1,
-                        fundingOutpoint.getHash().getReversedBytes(), (int) fundingOutpoint.getIndex());
+                //lastConfirmは現在のconfirmationと一致している場合がある。
+                //余裕を持たせて+3する。
+                resultSearch = searchOutPoint(
+                            blockHeight - minedHeight + 1 - lastConfirm + 3,
+                            fundingOutpoint.getHash().getReversedBytes(), (int) fundingOutpoint.getIndex());
             }
-            logger.debug("      " + ((txRaw != null) ? "SPENT" : "UNSPENT"));
+            logger.debug("      " + ((resultSearch.tx != null) ? "SPENT" : "UNSPENT"));
 
             PtarmiganChannel channel = mapChannel.get(Hex.toHexString(peerId));
             if (channel == null) {
@@ -795,7 +809,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             } else {
                 logger.debug("    change channel settings");
             }
-            channel.initialize(shortChannelId, fundingOutpoint, (txRaw == null));
+            channel.initialize(shortChannelId, fundingOutpoint, (resultSearch.tx == null));
             channel.setMinedBlockHash(blockHash, minedHeight, -1);
             if (minedHeight > 0) {
                 channel.setConfirmation(blockHeight - minedHeight + 1);
