@@ -465,10 +465,9 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         Sha256Hash blockHash = wak.wallet().getLastBlockSeenHash();
         if (blockHash == null) {
             logger.error("  searchOutPoint(): fail no blockhash");
-            return null;
+            return result;
         }
         logger.debug("  searchOutPoint(): blockhash=" + blockHash.toString() + ", n=" + n);
-        Sha256Hash resultHash = null;
         int blockcount = wak.wallet().getLastBlockSeenHeight();
         for (int i = 0; i < n; i++) {
             Block blk = getBlockEasy(blockHash);
@@ -476,20 +475,22 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                 logger.debug("searchOutPoint(): no transactions");
                 break;
             }
-            logger.debug("searchOutPoint(" + i + "):   blk=" + blk.getHashAsString());
+            logger.debug("searchOutPoint(" + blockcount + "):   blk=" + blk.getHashAsString());
             for (Transaction tx : blk.getTransactions()) {
                 TransactionOutPoint outPoint = tx.getInput(0).getOutpoint();
                 if (outPoint.getHash().equals(txHash) && outPoint.getIndex() == vIndex) {
                     result.tx = tx.bitcoinSerialize();
                     result.height = blockcount;
-                    resultHash = tx.getTxId();
+                    logger.debug("searchOutPoint(): result=" + tx.getTxId() + ", height=" + result.height);
                     break;
                 }
+            }
+            if (result.tx != null) {
+                break;
             }
             blockHash = blk.getPrevBlockHash();
             blockcount--;
         }
-        logger.debug("searchOutPoint(): result=" + ((result.tx != null) ? resultHash.toString() : "fail"));
         return result;
     }
     //
@@ -792,15 +793,16 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             logger.debug("  minedHeight=" + minedHeight);
             logger.debug("  blockCount =" + blockHeight);
 
-            SearchOutPointResult resultSearch = null;
+            byte[] txRaw = null;
             if (minedHeight > 0) {
                 //lastConfirmは現在のconfirmationと一致している場合がある。
                 //余裕を持たせて+3する。
-                resultSearch = searchOutPoint(
+                SearchOutPointResult resultSearch = searchOutPoint(
                             blockHeight - minedHeight + 1 - lastConfirm + 3,
                             fundingOutpoint.getHash().getReversedBytes(), (int) fundingOutpoint.getIndex());
+                txRaw = resultSearch.tx;
             }
-            logger.debug("      " + ((resultSearch.tx != null) ? "SPENT" : "UNSPENT"));
+            logger.debug("      " + ((txRaw != null) ? "SPENT" : "UNSPENT"));
 
             PtarmiganChannel channel = mapChannel.get(Hex.toHexString(peerId));
             if (channel == null) {
@@ -809,7 +811,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             } else {
                 logger.debug("    change channel settings");
             }
-            channel.initialize(shortChannelId, fundingOutpoint, (resultSearch.tx == null));
+            channel.initialize(shortChannelId, fundingOutpoint, (txRaw == null));
             channel.setMinedBlockHash(blockHash, minedHeight, -1);
             if (minedHeight > 0) {
                 channel.setConfirmation(blockHeight - minedHeight + 1);
