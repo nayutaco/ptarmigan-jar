@@ -91,7 +91,16 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             return String.format("height:%d, bIndex:%d, vIndex:%d", height, bIndex, vIndex);
         }
     }
-
+    public class SearchOutPointResult {
+        int height;
+        byte[] tx;
+        //
+        //
+        SearchOutPointResult() {
+            this.height = 0;
+            tx = null;
+        }
+    }
     interface JsonInterface {
         URL getUrl();
         long getFeeratePerKb(Moshi moshi) throws IOException;
@@ -449,35 +458,39 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         return null;
     }
     // ブロックから特定のoutpoint(txid,vIndex)をINPUT(vin[0])にもつtxを検索
-    public byte[] searchOutPoint(int n, byte[] txhash, int vIndex) {
+    public SearchOutPointResult searchOutPoint(int n, byte[] txhash, int vIndex) {
         Sha256Hash txHash = Sha256Hash.wrapReversed(txhash);
         logger.debug("searchOutPoint(): txid=" + txHash.toString() + ", n=" + n);
-        byte[] result = null;
+        SearchOutPointResult result = new SearchOutPointResult();
         Sha256Hash blockHash = wak.wallet().getLastBlockSeenHash();
         if (blockHash == null) {
             logger.error("  searchOutPoint(): fail no blockhash");
-            return null;
+            return result;
         }
         logger.debug("  searchOutPoint(): blockhash=" + blockHash.toString() + ", n=" + n);
-        Sha256Hash resultHash = null;
+        int blockcount = wak.wallet().getLastBlockSeenHeight();
         for (int i = 0; i < n; i++) {
             Block blk = getBlockEasy(blockHash);
             if (blk == null || blk.getTransactions() == null) {
                 logger.debug("searchOutPoint(): no transactions");
                 break;
             }
-            logger.debug("searchOutPoint(" + i + "):   blk=" + blk.getHashAsString());
+            logger.debug("searchOutPoint(" + blockcount + "):   blk=" + blk.getHashAsString());
             for (Transaction tx : blk.getTransactions()) {
                 TransactionOutPoint outPoint = tx.getInput(0).getOutpoint();
                 if (outPoint.getHash().equals(txHash) && outPoint.getIndex() == vIndex) {
-                    result = tx.bitcoinSerialize();
-                    resultHash = tx.getTxId();
+                    result.tx = tx.bitcoinSerialize();
+                    result.height = blockcount;
+                    logger.debug("searchOutPoint(): result=" + tx.getTxId() + ", height=" + result.height);
                     break;
                 }
             }
+            if (result.tx != null) {
+                break;
+            }
             blockHash = blk.getPrevBlockHash();
+            blockcount--;
         }
-        logger.debug("searchOutPoint(): result=" + ((result != null) ? resultHash.toString() : "fail"));
         return result;
     }
     //
@@ -782,9 +795,12 @@ public class Ptarmigan implements PtarmiganListenerInterface {
 
             byte[] txRaw = null;
             if (minedHeight > 0) {
-                //lastConfirmは現在のconfirmationと一致している場合があるため +1する
-                txRaw = searchOutPoint(blockHeight - minedHeight + 1 - lastConfirm + 1,
-                        fundingOutpoint.getHash().getReversedBytes(), (int) fundingOutpoint.getIndex());
+                //lastConfirmは現在のconfirmationと一致している場合がある。
+                //余裕を持たせて+3する。
+                SearchOutPointResult resultSearch = searchOutPoint(
+                            blockHeight - minedHeight + 1 - lastConfirm + 3,
+                            fundingOutpoint.getHash().getReversedBytes(), (int) fundingOutpoint.getIndex());
+                txRaw = resultSearch.tx;
             }
             logger.debug("      " + ((txRaw != null) ? "SPENT" : "UNSPENT"));
 
