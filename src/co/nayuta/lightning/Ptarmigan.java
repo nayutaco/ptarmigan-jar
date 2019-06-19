@@ -43,7 +43,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
     static private final int TIMEOUT_RETRY = 12;
     static private final long TIMEOUT_START = 5;            //sec
     static private final long TIMEOUT_SENDTX = 10000;       //msec
-    static private final long TIMEOUT_REJECT = 5000;        //msec
+    static private final long TIMEOUT_REJECT = 2000;        //msec
     static private final long TIMEOUT_GET = 30000;          //msec
     //
     static private final int RETRY_SENDRAWTX = 3;
@@ -581,6 +581,10 @@ public class Ptarmigan implements PtarmiganListenerInterface {
 
                 Transaction txret = wak.peerGroup().broadcastTransaction(tx).future().get(TIMEOUT_SENDTX, TimeUnit.MILLISECONDS);
                 logger.debug("sendRawTx(): txid=" + txret.getTxId().toString());
+                if (!txret.getTxId().equals(tx.getTxId())) {
+                    logger.error("sendRawTx(): txid not same");
+                    break;
+                }
 
                 retSendTx.lock();
                 switch (retSendTx.result) {
