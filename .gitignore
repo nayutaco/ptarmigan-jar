@@ -12,7 +12,6 @@
 
 .gradle
 gradlew.bat
-gradle/
 
 out/
 wallet/
