@@ -409,7 +409,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             int blockHeight = wak.wallet().getLastBlockSeenHeight();
             int c = 0;
             while (true) {
-                Block block = getBlockEasy(blockHash);
+                Block block = getBlock(blockHash);
                 if (block == null) {
                     break;
                 }
@@ -477,7 +477,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         Sha256Hash blockHash = wak.wallet().getLastBlockSeenHash();
         Block block = null;
         for (int i = 0; i < blks; i++) {
-            block = getBlockEasy(blockHash);
+            block = getBlock(blockHash);
             if (block != null && block.getTransactions() != null) {
                 blockHash = block.getPrevBlockHash();
             }
@@ -502,7 +502,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         logger.debug("  searchOutPoint(): blockhash=" + blockHash.toString() + ", n=" + n);
         int blockcount = wak.wallet().getLastBlockSeenHeight();
         for (int i = 0; i < n; i++) {
-            Block blk = getBlockEasy(blockHash);
+            Block blk = getBlock(blockHash);
             if (blk == null || blk.getTransactions() == null) {
                 logger.debug("searchOutPoint(): no transactions");
                 break;
@@ -531,7 +531,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         List<byte[]> txs = new ArrayList<>();
         Sha256Hash blockHash = wak.wallet().getLastBlockSeenHash();
         for (int i = 0; i < n; i++) {
-            Block blk = getBlockEasy(blockHash);
+            Block blk = getBlock(blockHash);
             if (blk == null || blk.getTransactions() == null) {
                 break;
             }
@@ -1043,28 +1043,28 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         }
     }
     // Block取得
-    private Block getBlockEasy(Sha256Hash blockHash) {
+    private Block getBlock(Sha256Hash blockHash) {
         if (blockCache.containsKey(blockHash)) {
-            logger.debug("  getBlockEasy() - blockCache1: " + blockHash.toString());
+            logger.debug("  getBlock() - blockCache1: " + blockHash.toString());
             return blockCache.get(blockHash);
         } else {
             try {
                 Peer peer = wak.peerGroup().getDownloadPeer();
                 if (peer == null) {
-                    logger.error("  getBlockEasy() - peer not found");
+                    logger.error("  getBlock() - peer not found");
                     return null;
                 }
                 Block block = peer.getBlock(blockHash).get(TIMEOUT_GET, TimeUnit.MILLISECONDS);
                 if (block != null) {
-                    logger.debug("  getBlockEasy() - blockCache2: " + blockHash.toString());
+                    logger.debug("  getBlock() - blockCache2: " + blockHash.toString());
                     blockCache.put(blockHash, block);
                     return block;
                 }
             } catch (Exception e) {
-                logger.error("getBlockEasy(): " + getStackTrace(e));
+                logger.error("getBlock(): " + getStackTrace(e));
             }
         }
-        logger.error("  getBlockEasy() - fail");
+        logger.error("  getBlock() - fail");
         return null;
     }
     // Block順次取得
@@ -1174,7 +1174,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
     //    //
     //    if (n > 0) {
     //        for (int i = 1; i <= n; i++) {
-    //            Block block = getBlockEasy(hash);
+    //            Block block = getBlock(hash);
     //            if (block != null) {
     //                list.add(block);
     //                hash = block.getHash();
@@ -1261,7 +1261,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
 
             logger.debug("  fundingTxid=" + fundingOutpoint.toString() + " conf=" + conf);
             if (ch.getConfirmation() <= 0) {
-                Block block = getBlockEasy(blockHash);
+                Block block = getBlock(blockHash);
                 if (block == null || !block.hasTransactions()) {
                     logger.debug("   no block");
                     break;
