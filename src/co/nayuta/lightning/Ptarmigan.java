@@ -985,6 +985,13 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         //
         wak.peerGroup().addPreMessageReceivedEventListener(Threading.SAME_THREAD, (peer, m) -> {
             //logger.debug("  [CB]PreMessageReceived: -> " + m);
+            if (m instanceof InventoryMessage) {
+                InventoryMessage im = (InventoryMessage)m;
+                logger.debug("  [CB]PreMessageReceived: -> inventory message: " + im);
+                for (InventoryItem item: im.getItems()) {
+                    logger.debug("  " + item.type + ": " + item.hash);
+                }
+            }
             if (m instanceof RejectMessage) {
                 RejectMessage rm = (RejectMessage)m;
                 logger.debug("  [CB]PreMessageReceived: -> reject message: " + rm.getReasonString());
