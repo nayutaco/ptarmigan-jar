@@ -1036,7 +1036,6 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         });
         wak.wallet().addTransactionConfidenceEventListener((wallet, tx) -> {
             logger.debug("  [CB]TransactionConfidence: -> " + tx.getTxId());
-            transactionConfidenceEvent(tx);
         });
         wak.wallet().addChangeEventListener(wallet -> {
             logger.debug("  [CB]WalletChange: -> " + wallet.getBalance().toFriendlyString());
@@ -1179,37 +1178,6 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         }
         return null;
     }
-    // 直近のBlock取得
-    //private List<Block> getLastNBlocks(int n) {
-    //    ArrayList<Block> list = new ArrayList<>();
-    //    Sha256Hash hash = wak.wallet().getLastBlockSeenHash();
-    //    //
-    //    if (n > 0) {
-    //        for (int i = 1; i <= n; i++) {
-    //            Block block = getBlock(hash);
-    //            if (block != null) {
-    //                list.add(block);
-    //                hash = block.getHash();
-    //            }
-    //        }
-    //    }
-    //    return Lists.reverse(list.stream().filter(Objects::nonNull).collect(Collectors.toList()));
-    //}
-    // 直近BlockからTx取得
-    //private List<Transaction> getLastNBlocksTx(int n) {
-    //    ArrayList<Transaction> txs = new ArrayList<>();
-    //    for (Block block : getLastNBlocks(n)) {
-    //        List<Transaction> tx = block.getTransactions();
-    //        if (tx != null) {
-    //            txs.addAll(tx);
-    //        }
-    //    }
-    //    return txs;
-    //}
-    // 監視対象Script登録
-    //private void addWatchScript(Script script) {
-    //    wak.wallet().addWatchedScripts(Collections.singletonList(script));
-    //}
     // 着金時処理
     private void recvEvent(Transaction txRecv) {
         findRegisteredTx(txRecv);
@@ -1304,35 +1272,13 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         }
     }
     //
-    private void transactionConfidenceEvent(Transaction tx) {
-        logger.debug("===== transactionConfidenceEvent(tx=" + tx.getTxId().toString() + ", txid=" + tx.getTxId().toString() + ")");
-        int conf = tx.getConfidence().getDepthInBlocks();
-        if (conf == 0) {
-            logger.debug("  conf=0");
-            return;
-        }
-        for (PtarmiganChannel ch : mapChannel.values()) {
-            TransactionOutPoint fundingOutpoint = ch.getFundingOutpoint();
-            if (fundingOutpoint == null) {
-                continue;
-            }
-            if (!fundingOutpoint.getHash().equals(tx.getTxId())) {
-                continue;
-            }
-            ch.setConfirmation(conf);
-            mapChannel.put(Hex.toHexString(ch.peerNodeId()), ch);
-            logger.debug(" --> " + ch.getConfirmation());
-            break;
-        }
-    }
-    //
     private void messageRejectEvent(RejectMessage message) {
         logger.debug("messageRejectEvent");
         logger.debug("  " + message.getRejectedObjectHash());
         logger.debug("  " + message.getReasonString());
 
         if (mapSendTx.containsKey(message.getRejectedObjectHash())) {
-            logger.debug("NG: send tx");
+            logger.debug("messageRejectEvent: NG: send tx");
             SendRawTxResult retSendTx = mapSendTx.get(message.getRejectedObjectHash());
             retSendTx.result = SendRawTxResult.Result.REJECT;
             mapSendTx.put(message.getRejectedObjectHash(), retSendTx);
