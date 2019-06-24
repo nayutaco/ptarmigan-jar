@@ -399,7 +399,6 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                 logger.debug("    fundingTxid=" + channel.getFundingOutpoint().toString());
             } else {
                 logger.error("getTxConfirmationFromBlock: no channel");
-                return 0;
             }
 
             Sha256Hash blockHash = wak.wallet().getLastBlockSeenHash();
@@ -413,17 +412,23 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                 if (block == null) {
                     break;
                 }
-                logger.debug("getTxConfirmationFromBlock: blockHash(" + c + ")=" + blockHash.toString());
+                logger.debug("getTxConfirmationFromBlock: blockHash(conf=" + (c + 1) + ")=" + blockHash.toString());
                 List<Transaction> txs = block.getTransactions();
                 if (txs != null) {
                     int bindex = 0;
                     for (Transaction tx0 : txs) {
                         if ((tx0 != null) && (tx0.getTxId().equals(txHash))) {
+                            // tx0.getConfidence()はnot nullでもdepthが0でしか返ってこなかった。
+                            if ((channel != null) && channel.getFundingOutpoint().getHash().equals(tx0.getTxId())) {
                             channel.setMinedBlockHash(block.getHash(), blockHeight - c, bindex);
                             channel.setConfirmation(c + 1);
                             mapChannel.put(Hex.toHexString(channel.peerNodeId()), channel);
                             logger.debug("getTxConfirmationFromBlock update: conf=" + channel.getConfirmation());
                             return channel.getConfirmation();
+                            } else {
+                                logger.debug("getTxConfirmationFromBlock not channel conf: " + (c + 1));
+                                return c + 1;
+                        }
                         }
                         bindex++;
                     }
@@ -432,7 +437,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                     logger.debug(" stop by creationHash");
                     break;
                 }
-                if (blockHash.equals(channel.getMinedBlockHash())) {
+                if ((channel != null) && blockHash.equals(channel.getMinedBlockHash())) {
                     logger.debug(" stop by minedHash");
                     break;
                 }
