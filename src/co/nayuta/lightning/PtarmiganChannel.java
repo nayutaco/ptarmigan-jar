@@ -86,21 +86,21 @@ public class PtarmiganChannel {
             throw new NullPointerException();
         }
     }
-
     int getConfirmation() {
         return this.confirmation;
     }
     //
     void setMinedBlockHash(Sha256Hash hash, int height, int bIndex) {
-        if ((hash != null) && !hash.equals(Sha256Hash.ZERO_HASH)) {
+        if ( this.minedHash.equals(Sha256Hash.ZERO_HASH) &&
+                (hash != null) && !hash.equals(Sha256Hash.ZERO_HASH) ) {
             this.minedHash = hash;
             logger.debug("  minedHash update");
         }
-        if (height > 0) {
+        if ((this.shortChannelId.height <= 0) && (height > 0)) {
             this.shortChannelId.height = height;
             logger.debug("  height update");
         }
-        if (bIndex != -1) {
+        if ((this.shortChannelId.bIndex <= 0) && (bIndex != -1)) {
             this.shortChannelId.bIndex = bIndex;
             logger.debug("  bindex update");
         }

@@ -18,3 +18,8 @@ wallet/
 build/
 
 .DS_Store
+
+/.settings
+/bin/
+/.classpath
+/.project
