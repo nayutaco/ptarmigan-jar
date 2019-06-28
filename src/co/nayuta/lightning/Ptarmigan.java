@@ -19,12 +19,14 @@ import javax.net.ssl.HttpsURLConnection;
 import java.io.*;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.stream.IntStream;
 
 public class Ptarmigan implements PtarmiganListenerInterface {
     static public final int CHECKUNSPENT_FAIL = -1;
@@ -49,6 +51,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
     static private final int RETRY_SENDRAWTX = 3;
     //
     static private final String FILE_STARTUP = "bitcoinj_startup.log";
+    static private final String WALLET_PREFIX = "ptarm_p2wpkh";
     //
     private NetworkParameters params;
     private WalletAppKit wak;
@@ -230,7 +233,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             wak = new WalletAppKit(params,
                     Script.ScriptType.P2WPKH,
                     KeyChainGroupStructure.DEFAULT,
-                    new File("./wallet" + pmtProtocolId), "ptarm_p2wpkh") {
+                    new File("./wallet" + pmtProtocolId), WALLET_PREFIX) {
                 @Override
                 protected void onSetupCompleted() {
                     logger.debug("spv_start: onSetupCompleted");
@@ -273,7 +276,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                 break;
             } catch (TimeoutException e) {
                 logger.error("spv_start: TimeoutException: " + e.getMessage());
-                logger.error("  " + getStackTrace(e));
+                logger.error("  trace: " + getStackTrace(e));
 
                 int nowHeight = 0;
                 try {
@@ -303,6 +306,10 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                 blockHeight = nowHeight;
             } catch (Exception e) {
                 logger.error("spv_start: " + getStackTrace(e));
+                if (e.getCause() instanceof IOException) {
+                    logger.error("IOException: remove chain file");
+                    removeChainFile();
+                }
                 ret = SPV_START_ERR;
                 break;
             }
@@ -317,6 +324,24 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             saveDownloadLog("NG");
         }
         return ret;
+    }
+    //
+    private void removeChainFile() {
+        wak.stopAsync();
+        String chainFilename = wak.directory().getAbsolutePath() +
+                FileSystems.getDefault().getSeparator() + WALLET_PREFIX + ".spvchain";
+        Path chainPathOriginal = Paths.get(chainFilename);
+        Path chainPathBackup = Paths.get(chainFilename + ".bak");
+        try {
+            Files.delete(chainPathBackup);
+        } catch (IOException eFile) {
+            //
+        }
+        try {
+            Files.move(chainPathOriginal, chainPathBackup);
+        } catch (IOException eFile) {
+            logger.error("spv_start rename chain: " + getStackTrace(eFile));
+        }
     }
     //
     private static String getStackTrace(Exception exception) {

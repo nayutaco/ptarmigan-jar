@@ -9,9 +9,7 @@ import java.util.concurrent.TimeoutException;
 public class Main
 {
     public static void main( String[] argv ) {
-        Ptarmigan ptarm = null;
-        ptarm = new Ptarmigan();
-        ptarm.spv_start("");
+        Ptarmigan ptarm = new Ptarmigan();
 
         int val;
         val = Ptarmigan.CHECKUNSPENT_FAIL;
@@ -33,7 +31,7 @@ public class Main
         List<byte[]> listDummy = null;
         boolean dummyBool = false;
         long dummyLong = 0;
-        dummyInt = ptarm.spv_start("");
+        dummyInt = ptarm.spv_start("test");
         ptarm.setCreationHash(dummyBytes);
         dummyInt = ptarm.getBlockCount(dummyBytes);
         dummyBytes = ptarm.getGenesisBlockHash();
