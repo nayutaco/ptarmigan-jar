@@ -216,7 +216,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         logger = LoggerFactory.getLogger(this.getClass());
 
         logger.info("bitcoinj " + VersionMessage.BITCOINJ_VERSION);
-        saveDownloadLog("begin");
+        saveDownloadLog(false, "Begin SPV");
     }
     //
     public int spv_start(String pmtProtocolId) {
@@ -245,7 +245,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                     if (blockHeight != -1) {
                         System.out.print("(" + blockHeight + ")");
                     }
-                    saveDownloadLog("download");
+                    saveDownloadLog(false, "Download");
                     logger.debug("spv_start: onSetupCompleted - exit");
                 }
             };
@@ -290,7 +290,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                 if (blockHeight < nowHeight) {
                     logger.info("spv_start: block downloading:" + nowHeight);
                     System.out.print("\n   block downloading(" + nowHeight + ") ");
-                    saveDownloadLog("height=" + nowHeight);
+                    saveDownloadLog(false, String.valueOf(nowHeight));
                     retry = TIMEOUT_RETRY;
                 } else {
                     retry--;
@@ -318,10 +318,10 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         logger.info("spv_start - exit");
         if (ret == SPV_START_OK) {
             System.out.println("\nblock downloaded(" + blockHeight + ")");
-            saveDownloadLog("OK");
+            saveDownloadLog(false, "Downloaded");
         } else {
             System.err.println("fail: bitcoinj start");
-            saveDownloadLog("NG");
+            saveDownloadLog(true, "fail DL");
         }
         return ret;
     }
@@ -1052,10 +1052,10 @@ public class Ptarmigan implements PtarmiganListenerInterface {
     }
 
     // save block download logfile
-    private void saveDownloadLog(String str) {
+    private void saveDownloadLog(boolean bStop, String str) {
         try {
             FileWriter fileWriter = new FileWriter("./logs/" + FILE_STARTUP, false);
-            fileWriter.write(str);
+            fileWriter.write((bStop) ? "STOP=" : "CONT=" + str);
             fileWriter.close();
         } catch (IOException e) {
             logger.error("FileWriter:" + str);
