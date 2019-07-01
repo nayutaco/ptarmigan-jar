@@ -53,6 +53,10 @@ public class Ptarmigan implements PtarmiganListenerInterface {
     static private final String FILE_STARTUP = "bitcoinj_startup.log";
     static private final String WALLET_PREFIX = "ptarm_p2wpkh";
     //
+    static private final int STARTUPLOG_CONT = 1;
+    static private final int STARTUPLOG_STOP = 2;
+    static private final int STARTUPLOG_BLOCK = 3;
+    //
     private NetworkParameters params;
     private WalletAppKit wak;
     private LinkedHashMap<Sha256Hash, Block> blockCache = new LinkedHashMap<>();
@@ -216,7 +220,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         logger = LoggerFactory.getLogger(this.getClass());
 
         logger.info("bitcoinj " + VersionMessage.BITCOINJ_VERSION);
-        saveDownloadLog(false, "Begin SPV");
+        saveDownloadLog(STARTUPLOG_CONT, "Begin SPV");
     }
     //
     public int spv_start(String pmtProtocolId) {
@@ -245,7 +249,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                     if (blockHeight != -1) {
                         System.out.print("(" + blockHeight + ")");
                     }
-                    saveDownloadLog(false, "Download");
+                    saveDownloadLog(STARTUPLOG_CONT, "Download");
                     logger.debug("spv_start: onSetupCompleted - exit");
                 }
             };
@@ -290,7 +294,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                 if (blockHeight < nowHeight) {
                     logger.info("spv_start: block downloading:" + nowHeight);
                     System.out.print("\n   block downloading(" + nowHeight + ") ");
-                    saveDownloadLog(false, String.valueOf(nowHeight));
+                    saveDownloadLog(STARTUPLOG_BLOCK, String.valueOf(nowHeight));
                     retry = TIMEOUT_RETRY;
                 } else {
                     retry--;
@@ -318,10 +322,10 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         logger.info("spv_start - exit");
         if (ret == SPV_START_OK) {
             System.out.println("\nblock downloaded(" + blockHeight + ")");
-            saveDownloadLog(false, "Downloaded");
+            saveDownloadLog(STARTUPLOG_CONT, "Downloaded");
         } else {
             System.err.println("fail: bitcoinj start");
-            saveDownloadLog(true, "fail DL");
+            saveDownloadLog(STARTUPLOG_STOP, "fail DL");
         }
         return ret;
     }
@@ -1052,10 +1056,24 @@ public class Ptarmigan implements PtarmiganListenerInterface {
     }
 
     // save block download logfile
-    private void saveDownloadLog(boolean bStop, String str) {
+    private void saveDownloadLog(int logPrefix, String str) {
         try {
             FileWriter fileWriter = new FileWriter("./logs/" + FILE_STARTUP, false);
-            fileWriter.write((bStop) ? "STOP=" : "CONT=" + str);
+            String prefix;
+            switch (logPrefix) {
+                case STARTUPLOG_CONT:
+                    prefix = "CONT=";
+                    break;
+                case STARTUPLOG_STOP:
+                    prefix = "STOP=";
+                    break;
+                case STARTUPLOG_BLOCK:
+                    prefix = "BLOCK=";
+                    break;
+                default:
+                    prefix = "";
+            }
+            fileWriter.write(prefix + str);
             fileWriter.close();
         } catch (IOException e) {
             logger.error("FileWriter:" + str);
