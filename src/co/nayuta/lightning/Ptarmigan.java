@@ -146,36 +146,41 @@ public class Ptarmigan implements PtarmiganListenerInterface {
     }
 
     //for Moshi JSON parser
-    static class JsonBitcoinFeesEarn implements JsonInterface {
-        //https://bitcoinfees.earn.com/api
-        //satoshis per byte
-        static class JsonParam {
-            //int fastestFee;
-            //int halfHourFee;
-            int hourFee;
-        }
-        URL url;
-
-        JsonBitcoinFeesEarn() {
-            try {
-                this.url = new URL("https://bitcoinfees.earn.com/api/v1/fees/recommended");
-            } catch (MalformedURLException e) {
-                this.url = null;
-            }
-        }
-
-        @Override
-        public URL getUrl() {
-            return this.url;
-        }
-
-        @Override
-        public long getFeeratePerKb(Moshi moshi) throws IOException {
-            JsonAdapter<JsonParam> jsonAdapter = moshi.adapter(JsonParam.class);
-            JsonParam fee = jsonAdapter.fromJson(getFeeJson(this));
-            return (fee != null) ? fee.hourFee * 1000 : Transaction.DEFAULT_TX_FEE.getValue();
-        }
-    }
+//    static class JsonBitcoinFeesEarn implements JsonInterface {
+//        //https://bitcoinfees.earn.com/api
+//        //satoshis per byte
+//        static class JsonParam {
+//            //int fastestFee;
+//            //int halfHourFee;
+//            int hourFee;
+//        }
+//        URL url;
+//
+//        JsonBitcoinFeesEarn(String protocolId) {
+//            try {
+//                if (protocolId.equals(NetworkParameters.PAYMENT_PROTOCOL_ID_MAINNET)) {
+//                    this.url = new URL("https://bitcoinfees.earn.com/api/v1/fees/recommended");
+//                } else {
+//                    //no testnet service
+//                    this.url = null;
+//                }
+//            } catch (MalformedURLException e) {
+//                this.url = null;
+//            }
+//        }
+//
+//        @Override
+//        public URL getUrl() {
+//            return this.url;
+//        }
+//
+//        @Override
+//        public long getFeeratePerKb(Moshi moshi) throws IOException {
+//            JsonAdapter<JsonParam> jsonAdapter = moshi.adapter(JsonParam.class);
+//            JsonParam fee = jsonAdapter.fromJson(getFeeJson(this));
+//            return (fee != null) ? fee.hourFee * 1000 : Transaction.DEFAULT_TX_FEE.getValue();
+//        }
+//    }
     static class JsonBlockCypher implements JsonInterface {
         //https://www.blockcypher.com/dev/bitcoin/#blockchain
         //satoshis per KB
@@ -184,10 +189,19 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         }
         URL url;
 
-        JsonBlockCypher() {
+        JsonBlockCypher(String protocolId) {
+            String url;
+            if (protocolId.equals(NetworkParameters.PAYMENT_PROTOCOL_ID_MAINNET)) {
+                url = "https://api.blockcypher.com/v1/btc/main";
+            } else if (protocolId.equals(NetworkParameters.PAYMENT_PROTOCOL_ID_TESTNET)) {
+                url = "https://api.blockcypher.com/v1/btc/test3";
+            } else {
+                url = "";
+            }
             try {
-                this.url = new URL("https://api.blockcypher.com/v1/btc/test3");
+                this.url = new URL(url);
             } catch (MalformedURLException e) {
+                System.out.println("malformedURL");
                 this.url = null;
             }
         }
@@ -212,6 +226,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
 
         @Override
         public long getFeeratePerKb(Moshi moshi) {
+            System.out.println("use constant fee");
             return Transaction.DEFAULT_TX_FEE.getValue();
         }
     }
@@ -802,11 +817,8 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         long returnFeeKb;
         JsonInterface jsonInterface;
         Moshi moshi = new Moshi.Builder().build();
-        if (NetworkParameters.PAYMENT_PROTOCOL_ID_MAINNET.equals(params.getPaymentProtocolId())) {
-            jsonInterface = new JsonBitcoinFeesEarn();
-        } else if (NetworkParameters.PAYMENT_PROTOCOL_ID_TESTNET.equals(params.getPaymentProtocolId())) {
-            jsonInterface = new JsonBlockCypher();
-        } else {
+        jsonInterface = new JsonBlockCypher(params.getPaymentProtocolId());
+        if (jsonInterface.getUrl() == null) {
             jsonInterface = new JsonConstantFee();
         }
         try {
@@ -814,6 +826,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         } catch (Exception e) {
             returnFeeKb = Transaction.DEFAULT_TX_FEE.getValue();
         }
+        logger.debug("feerate=" + returnFeeKb);
         return returnFeeKb;
     }
     private static String getFeeJson(JsonInterface jsoninf) throws IOException {
