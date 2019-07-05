@@ -29,6 +29,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 public class Ptarmigan implements PtarmiganListenerInterface {
+    static public final String VERSION = "0.0.2";
+    //
     static public final int CHECKUNSPENT_FAIL = -1;
     static public final int CHECKUNSPENT_UNSPENT = 0;
     static public final int CHECKUNSPENT_SPENT = 1;
@@ -234,8 +236,8 @@ public class Ptarmigan implements PtarmiganListenerInterface {
     public Ptarmigan() {
         logger = LoggerFactory.getLogger(this.getClass());
 
+        logger.info("Version: " + VERSION);
         logger.info("bitcoinj " + VersionMessage.BITCOINJ_VERSION);
-        saveDownloadLog(STARTUPLOG_CONT, "Begin SPV");
     }
     //
     public int spv_start(String pmtProtocolId) {
