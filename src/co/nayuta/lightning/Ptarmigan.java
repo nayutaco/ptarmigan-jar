@@ -29,7 +29,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 public class Ptarmigan implements PtarmiganListenerInterface {
-    static public final String VERSION = "0.0.2";
+    static public final String VERSION = "0.0.2.x";
     //
     static public final int CHECKUNSPENT_FAIL = -1;
     static public final int CHECKUNSPENT_UNSPENT = 0;
@@ -59,6 +59,8 @@ public class Ptarmigan implements PtarmiganListenerInterface {
     static private final int STARTUPLOG_STOP = 2;
     static private final int STARTUPLOG_BLOCK = 3;
     //
+    static private final int DOWNLOAD_FAIL_COUNT_MAX = 10;
+    //
     private NetworkParameters params;
     private WalletAppKit wak;
     private LinkedHashMap<Sha256Hash, Block> blockCache = new LinkedHashMap<>();
@@ -66,6 +68,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
     private HashMap<String, PtarmiganChannel> mapChannel = new HashMap<>();
     private HashMap<Sha256Hash, SendRawTxResult> mapSendTx = new HashMap<>();
     private Sha256Hash creationHash;
+    private int downloadFailCount = 0;
     private Logger logger;
 
     public class ShortChannelParam {
@@ -456,6 +459,11 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             while (true) {
                 Block block = getBlock(blockHash);
                 if (block == null) {
+                    if (downloadFailCount >= DOWNLOAD_FAIL_COUNT_MAX) {
+                        //
+                        logger.error("stop SPV: too many fail download");
+                        throw new Exception();
+                    }
                     break;
                 }
                 logger.debug("getTxConfirmationFromBlock: blockHash(conf=" + (c + 1) + ")=" + blockHash.toString());
@@ -1318,9 +1326,11 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             if (block != null) {
                 logger.debug("  getBlockFromPeer() " + blockHash.toString());
                 blockCache.put(blockHash, block);
+                downloadFailCount = 0;
             }
         } catch (Exception e) {
             logger.error("getBlockFromPeer(): " + getStackTrace(e));
+            downloadFailCount++;
         }
         return block;
     }
