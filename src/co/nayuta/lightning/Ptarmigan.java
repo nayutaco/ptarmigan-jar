@@ -241,6 +241,12 @@ public class Ptarmigan implements PtarmiganListenerInterface {
 
         logger.info("Version: " + VERSION);
         logger.info("bitcoinj " + VersionMessage.BITCOINJ_VERSION);
+        saveDownloadLog(STARTUPLOG_CONT, "SPV:" + VERSION);
+        try {
+            Thread.sleep(2000);
+        } catch (InterruptedException e) {
+            //e.printStackTrace();
+        }
     }
     //
     public int spv_start(String pmtProtocolId) {
@@ -254,6 +260,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
 
         try {
             logger.debug("spv_start: start WalletAppKit");
+            saveDownloadLog(STARTUPLOG_CONT, "Blocks..");
             wak = new WalletAppKit(params,
                     Script.ScriptType.P2WPKH,
                     KeyChainGroupStructure.DEFAULT,
@@ -269,7 +276,6 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                     if (blockHeight != -1) {
                         System.out.print("(" + blockHeight + ")");
                     }
-                    saveDownloadLog(STARTUPLOG_CONT, "Download");
                     logger.debug("spv_start: onSetupCompleted - exit");
                 }
             };
@@ -342,7 +348,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         logger.info("spv_start - exit");
         if (ret == SPV_START_OK) {
             System.out.println("\nblock downloaded(" + blockHeight + ")");
-            saveDownloadLog(STARTUPLOG_CONT, "Downloaded");
+            saveDownloadLog(STARTUPLOG_CONT, "done.");
         } else {
             System.err.println("fail: bitcoinj start");
             saveDownloadLog(STARTUPLOG_STOP, "fail DL");
