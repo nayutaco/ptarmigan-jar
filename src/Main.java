@@ -23,33 +23,37 @@ public class Main
         val = Ptarmigan.SPV_START_BJ;
         val = Ptarmigan.SPV_START_ERR;
 
-        int dummyInt = 0;
-        byte[] dummyBytes = null;
-        Ptarmigan.ShortChannelParam dummyChan = null;
-        Ptarmigan.SearchOutPointResult dummySearch = null;
-        Sha256Hash dummyHash = null;
-        List<byte[]> listDummy = null;
-        boolean dummyBool = false;
-        long dummyLong = 0;
-        dummyInt = ptarm.spv_start("test");
-        ptarm.setCreationHash(dummyBytes);
-        dummyInt = ptarm.getBlockCount(dummyBytes);
-        dummyBytes = ptarm.getGenesisBlockHash();
-        dummyInt = ptarm.getTxConfirmation(dummyBytes);
-        dummyChan = ptarm.getShortChannelParam(dummyBytes);
-        dummyHash = ptarm.getTxidFromShortChannelId(0);
-        dummySearch = ptarm.searchOutPoint(0, dummyBytes, 0);
-        listDummy = ptarm.searchVout(0, new ArrayList<byte[]>());
-        dummyBytes = ptarm.signRawTx(0, dummyBytes);
-        dummyBytes = ptarm.sendRawTx(dummyBytes);
-        dummyBool = ptarm.checkBroadcast(dummyBytes, dummyBytes);
-        dummyInt = ptarm.checkUnspent(dummyBytes, dummyBytes, 0);
-        String dummyAddr = ptarm.getNewAddress();
-        dummyLong = ptarm.estimateFee();
-        ptarm.setChannel(dummyBytes, 0, dummyBytes, 0, dummyBytes, dummyBytes, 0);
-        ptarm.delChannel(dummyBytes);
-        ptarm.setCommitTxid(dummyBytes, 0, 0, null);
-        dummyLong = ptarm.getBalance();
-        dummyBytes = ptarm.emptyWallet("");
+        try {
+            int dummyInt = 0;
+            byte[] dummyBytes = null;
+            Ptarmigan.ShortChannelParam dummyChan = null;
+            Ptarmigan.SearchOutPointResult dummySearch = null;
+            Sha256Hash dummyHash = null;
+            List<byte[]> listDummy = null;
+            boolean dummyBool = false;
+            long dummyLong = 0;
+            dummyInt = ptarm.spv_start("test");
+            ptarm.setCreationHash(dummyBytes);
+            dummyInt = ptarm.getBlockCount(dummyBytes);
+            dummyBytes = ptarm.getGenesisBlockHash();
+            dummyInt = ptarm.getTxConfirmation(dummyBytes);
+            dummyChan = ptarm.getShortChannelParam(dummyBytes);
+            dummyHash = ptarm.getTxidFromShortChannelId(0);
+            dummySearch = ptarm.searchOutPoint(0, dummyBytes, 0);
+            listDummy = ptarm.searchVout(0, new ArrayList<byte[]>());
+            dummyBytes = ptarm.signRawTx(0, dummyBytes);
+            dummyBytes = ptarm.sendRawTx(dummyBytes);
+            dummyBool = ptarm.checkBroadcast(dummyBytes, dummyBytes);
+            dummyInt = ptarm.checkUnspent(dummyBytes, dummyBytes, 0);
+            String dummyAddr = ptarm.getNewAddress();
+            dummyLong = ptarm.estimateFee();
+            ptarm.setChannel(dummyBytes, 0, dummyBytes, 0, dummyBytes, dummyBytes, 0);
+            ptarm.delChannel(dummyBytes);
+            ptarm.setCommitTxid(dummyBytes, 0, 0, null);
+            dummyLong = ptarm.getBalance();
+            dummyBytes = ptarm.emptyWallet("");
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 }

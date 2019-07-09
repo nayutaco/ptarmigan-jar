@@ -145,6 +145,9 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         }
     }
     //
+    static class PtarmException extends Exception {
+    }
+    //
     interface JsonInterface {
         URL getUrl();
         long getFeeratePerKb(Moshi moshi) throws IOException;
@@ -418,7 +421,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
      * @param txhash target TXID
      * @return 取得できない場合0を返す
      */
-    public int getTxConfirmation(byte[] txhash) {
+    public int getTxConfirmation(byte[] txhash) throws PtarmException {
         Sha256Hash txHash = Sha256Hash.wrapReversed(txhash);
         logger.debug("getTxConfirmation(): txid=" + txHash.toString());
 
@@ -447,7 +450,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
         return getTxConfirmationFromBlock(matchChannel, txHash);
     }
     //
-    private int getTxConfirmationFromBlock(PtarmiganChannel channel, Sha256Hash txHash) {
+    private int getTxConfirmationFromBlock(PtarmiganChannel channel, Sha256Hash txHash) throws PtarmException {
         try {
             logger.debug("getTxConfirmationFromBlock(): txid=" + txHash.toString());
             if (channel != null) {
@@ -468,7 +471,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                     if (downloadFailCount >= DOWNLOAD_FAIL_COUNT_MAX) {
                         //
                         logger.error("stop SPV: too many fail download");
-                        throw new Exception();
+                        throw new PtarmException();
                     }
                     break;
                 }
@@ -505,6 +508,9 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                 blockHash = block.getPrevBlockHash();
                 c++;
             }
+        } catch (PtarmException e) {
+            logger.error("rethrow: " + getStackTrace(e));
+            throw e;
         } catch (Exception e) {
             logger.error("getTxConfirmationFromBlock: " + getStackTrace(e));
         }
@@ -1335,8 +1341,8 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                 downloadFailCount = 0;
             }
         } catch (Exception e) {
-            logger.error("getBlockFromPeer(): " + getStackTrace(e));
             downloadFailCount++;
+            logger.error("getBlockFromPeer(count=" + downloadFailCount + "): " + getStackTrace(e));
         }
         return block;
     }
