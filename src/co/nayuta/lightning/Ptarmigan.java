@@ -930,7 +930,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                 //余裕を持たせて+3する。
                 SearchOutPointResult resultSearch = searchOutPoint(
                             blockHeight - minedHeight + 1 - lastConfirm + 3,
-                            fundingOutpoint.getHash().getReversedBytes(), (int) fundingOutpoint.getIndex());
+                            fundingOutpoint.getHash().getReversedBytes(), (int)fundingOutpoint.getIndex());
                 txRaw = resultSearch.tx;
             }
             logger.debug("      " + ((txRaw != null) ? "SPENT" : "UNSPENT"));
@@ -942,6 +942,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             } else {
                 logger.debug("    change channel settings");
             }
+            //shortChannelIdが0以外ならheight, bIndex, vIndexが更新される
             channel.initialize(shortChannelId, fundingOutpoint, (txRaw == null));
             channel.setMinedBlockHash(blockHash, minedHeight, -1);
             if (minedHeight > 0) {
@@ -1285,16 +1286,6 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                         }
                     }
                     bindex++;
-                }
-            } else {
-                //update confirmation
-                logger.debug("  blockDownloadEvent: current conf=" + ch.getConfirmation());
-                if (height > 0) {
-                    logger.debug("  blockDownloadEvent: update conf");
-                    int current_height = (ch.getShortChannelId() != null) ? ch.getShortChannelId().height : 0;
-                    ch.setMinedBlockHash(blockHash, height - current_height + 1, -1);
-                } else {
-                    logger.debug("  blockDownloadEvent: NOT update conf");
                 }
             }
 

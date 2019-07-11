@@ -91,18 +91,17 @@ public class PtarmiganChannel {
     }
     //
     void setMinedBlockHash(Sha256Hash hash, int height, int bIndex) {
-        if ( this.minedHash.equals(Sha256Hash.ZERO_HASH) &&
-                (hash != null) && !hash.equals(Sha256Hash.ZERO_HASH) ) {
+        if ((hash != null) && !hash.equals(Sha256Hash.ZERO_HASH)) {
+            logger.debug("setMinedBlockHash():  minedHash update: before=" + this.minedHash.toString());
             this.minedHash = hash;
-            logger.debug("  minedHash update");
         }
-        if ((this.shortChannelId.height <= 0) && (height > 0)) {
+        if (height > 0) {
+            logger.debug("setMinedBlockHash():  height update: before=" + this.shortChannelId.height);
             this.shortChannelId.height = height;
-            logger.debug("  height update");
         }
-        if ((this.shortChannelId.bIndex <= 0) && (bIndex != -1)) {
+        if ((this.shortChannelId.bIndex <= 0) && (bIndex >= 0)) {
+            logger.debug("setMinedBlockHash():  bindex update: before=" + this.shortChannelId.bIndex);
             this.shortChannelId.bIndex = bIndex;
-            logger.debug("  bindex update");
         }
         logger.debug("setMinedBlockHash(node=" + Hex.toHexString(this.peerNodeId) + "):");
         logger.debug("  minedHash=" + this.minedHash.toString());
