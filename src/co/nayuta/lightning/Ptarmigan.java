@@ -28,7 +28,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
-public class Ptarmigan implements PtarmiganListenerInterface {
+public class Ptarmigan {
     static public final String VERSION = "0.0.2.x";
     //
     static public final int CHECKUNSPENT_FAIL = -1;
@@ -421,7 +421,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
      * @param txhash target TXID
      * @return 取得できない場合0を返す
      */
-    public int getTxConfirmation(byte[] txhash) throws PtarmException {
+    public int getTxConfirmation(byte[] txhash, int voutIndex, byte[] voutWitProg, long amount) throws PtarmException {
         Sha256Hash txHash = Sha256Hash.wrapReversed(txhash);
         logger.debug("getTxConfirmation(): txid=" + txHash.toString());
 
@@ -447,10 +447,10 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             logger.error("getTxConfirmation(): " + getStackTrace(e));
         }
         logger.debug("fail ---> get from block");
-        return getTxConfirmationFromBlock(matchChannel, txHash);
+        return getTxConfirmationFromBlock(matchChannel, txHash, voutIndex, voutWitProg, amount);
     }
     //
-    private int getTxConfirmationFromBlock(PtarmiganChannel channel, Sha256Hash txHash) throws PtarmException {
+    private int getTxConfirmationFromBlock(PtarmiganChannel channel, Sha256Hash txHash, int voutIndex, byte[] voutWitProg, long amount) throws PtarmException {
         try {
             logger.debug("getTxConfirmationFromBlock(): txid=" + txHash.toString());
             if (channel != null) {
@@ -483,10 +483,34 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                         if ((tx0 != null) && (tx0.getTxId().equals(txHash))) {
                             // tx0.getConfidence()はnot nullでもdepthが0でしか返ってこなかった。
                             if ((channel != null) && channel.getFundingOutpoint().getHash().equals(tx0.getTxId())) {
+                                if (voutIndex != -1) {
+                                    //check vout
+                                    TransactionOutput vout = tx0.getOutput(voutIndex);
+                                    if (vout == null) {
+                                        logger.error("getTxConfirmationFromBlock: bad vout index");
+                                        return 0;
+                                    }
+                                    logger.debug("vout: " + vout.toString());
+                                    if (vout.getValue().value != amount) {
+                                        logger.error("getTxConfirmationFromBlock: bad amount");
+                                        return 0;
+                                    }
+                                    logger.debug("voutScript: " + Hex.toHexString(vout.getScriptBytes()));
+                                    if (vout.getScriptBytes().length != 34) {
+                                        logger.error("getTxConfirmationFromBlock: bad vout script length");
+                                        return 0;
+                                    }
+                                    if (!Arrays.equals(vout.getScriptBytes(), voutWitProg)) {
+                                        logger.error("getTxConfirmationFromBlock: bad vout script");
+                                        return 0;
+                                    }
+                                    logger.debug("vout check OK!");
+                                }
                                 channel.setMinedBlockHash(block.getHash(), blockHeight - c, bindex);
                                 channel.setConfirmation(c + 1);
                                 mapChannel.put(Hex.toHexString(channel.peerNodeId()), channel);
                                 logger.debug("getTxConfirmationFromBlock update: conf=" + channel.getConfirmation());
+                                logger.debug("CONF:funding_tx:" + tx0.toString());
                                 return channel.getConfirmation();
                             } else {
                                 logger.debug("getTxConfirmationFromBlock not channel conf: " + (c + 1));
@@ -1202,11 +1226,9 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                 continue;
             }
             logger.debug("   ch txid=" + fundingOutpoint.toString());
-            boolean detect = false;
             if (targetOutpointTxid.equals(fundingOutpoint)) {
                 logger.debug("  funding spent!");
                 ch.setFundingTxSpent();
-                detect = true;
             } else {
                 int idx = checkCommitTxids(ch, targetTx.getTxId());
                 if (idx != COMMITTXID_MAX) {
@@ -1220,11 +1242,7 @@ public class Ptarmigan implements PtarmiganListenerInterface {
                     }
                     ch.getCommitTxid(idx).unspent = false;
                     mapChannel.put(Hex.toHexString(ch.peerNodeId()), ch);
-                    detect = true;
                 }
-            }
-            if (detect) {
-                sendFundingTransactionHandler(ch, targetTx);
             }
         }
     }
@@ -1233,65 +1251,51 @@ public class Ptarmigan implements PtarmiganListenerInterface {
     //すなわち、Wallet#getLastBlockSeenHeight()とも一致しないということである。
     private void blockDownloadEvent(Sha256Hash blockHash) {
         logger.debug("===== blockDownloadEvent(block=" + blockHash.toString() + ")");
-
-        int height = 0;
-        try {
-            BlockStore bs = wak.chain().getBlockStore();
-            StoredBlock sb = bs.get(blockHash);
-            if (sb != null) {
-                height = sb.getHeight();
-                logger.debug("            BBBBB BlockStoredHeight=" + height);
-            } else {
-                logger.debug("            BBBBB null");
-            }
-        } catch (Exception e) {
-            logger.error("BBBBB: " + getStackTrace(e));
-        }
-
-        for (PtarmiganChannel ch : mapChannel.values()) {
-            TransactionOutPoint fundingOutpoint = ch.getFundingOutpoint();
-            if (fundingOutpoint == null) {
-                logger.debug("  no channel");
-                continue;
-            }
-            if (ch.getConfirmation() <= 0) {
-                //mining check
-                logger.debug("  blockDownloadEvent: mining check");
-
-                Block block = getBlock(blockHash);
-                if (block == null || !block.hasTransactions()) {
-                    logger.debug("   no block");
-                    break;
-                }
-                int bindex = 0;
-                List<Transaction> txs = block.getTransactions();
-                if (txs == null) {
-                    logger.debug("   no transaction");
-                    break;
-                }
-                for (Transaction tx: txs) {
-                    if (tx != null) {
-                        logger.debug("   blockDownloadEvent: tx=" + tx.getTxId().toString());
-                        if (tx.getTxId().equals(fundingOutpoint.getHash())) {
-                            if (tx.getConfidence() != null) {
-                                int blockHeight = tx.getConfidence().getAppearedAtChainHeight();
-                                logger.debug("   blockDownloadEvent: height=" + blockHeight);
-                                ch.setMinedBlockHash(blockHash, blockHeight, bindex);
-                                ch.setConfirmation(1);
-                                confFundingTransactionHandler(ch, tx);
-                            } else {
-                                logger.debug("  blockDownloadEvent: no confidence");
-                            }
-                            break;
-                        }
-                    }
-                    bindex++;
-                }
-            }
-
-            mapChannel.put(Hex.toHexString(ch.peerNodeId()), ch);
-            logger.debug(" --> " + ch.getConfirmation());
-        }
+//
+//        for (PtarmiganChannel ch : mapChannel.values()) {
+//            TransactionOutPoint fundingOutpoint = ch.getFundingOutpoint();
+//            if (fundingOutpoint == null) {
+//                logger.debug("  no channel");
+//                continue;
+//            }
+//            if (ch.getConfirmation() <= 0) {
+//                //mining check
+//                logger.debug("  blockDownloadEvent: mining check");
+//
+//                Block block = getBlock(blockHash);
+//                if (block == null || !block.hasTransactions()) {
+//                    logger.debug("   no block");
+//                    break;
+//                }
+//                int bindex = 0;
+//                List<Transaction> txs = block.getTransactions();
+//                if (txs == null) {
+//                    logger.debug("   no transaction");
+//                    break;
+//                }
+//                for (Transaction tx: txs) {
+//                    if (tx != null) {
+//                        logger.debug("   blockDownloadEvent: tx=" + tx.getTxId().toString());
+//                        if (tx.getTxId().equals(fundingOutpoint.getHash())) {
+//                            if (tx.getConfidence() != null) {
+//                                int blockHeight = tx.getConfidence().getAppearedAtChainHeight();
+//                                logger.debug("   blockDownloadEvent: height=" + blockHeight);
+//                                ch.setMinedBlockHash(blockHash, blockHeight, bindex);
+//                                ch.setConfirmation(1);
+//                                logger.debug("BLOCK funding_tx:" + tx.toString());
+//                            } else {
+//                                logger.debug("  blockDownloadEvent: no confidence");
+//                            }
+//                            break;
+//                        }
+//                    }
+//                    bindex++;
+//                }
+//            }
+//
+//            mapChannel.put(Hex.toHexString(ch.peerNodeId()), ch);
+//            logger.debug(" --> " + ch.getConfirmation());
+//        }
     }
     //
     private void messageRejectEvent(RejectMessage message) {
@@ -1346,37 +1350,5 @@ public class Ptarmigan implements PtarmiganListenerInterface {
             //logger.debug("       fund:" + ((fundingOutpoint != null) ? fundingOutpoint.toString() : "no-fundtx") + ":" + ch.getShortChannelId().vIndex);
         }
         logger.debug("===== debugShowRegisteredChannel: end =====");
-    }
-
-    //-------------------------------------------------------------------------
-    // EventHandler
-    //-------------------------------------------------------------------------
-    //
-    @Override
-    public void confFundingTransactionHandler(PtarmiganChannel channel, Transaction tx) {
-        logger.debug("[CONF FUNDING]" + channel.toString());
-        logger.debug("                peerId: " + Hex.toHexString(channel.peerNodeId()));
-        logger.debug("                conf: " + channel.getConfirmation());
-        logger.debug(tx.toString());
-    }
-    //
-    @Override
-    public void sendFundingTransactionHandler(PtarmiganChannel channel, Transaction tx) {
-        logger.debug("[SEND FUNDING]" + channel.toString());
-        logger.debug(tx.toString());
-    }
-    //
-    @Override
-    public void confTransactionHandler(PtarmiganChannel channel, Transaction tx) {
-        logger.debug("[CONF TX]" + channel.toString());
-        logger.debug("          conf: " + channel.getConfirmation());
-        logger.debug("          peerId: " + Hex.toHexString(channel.peerNodeId()));
-        logger.debug(tx.toString());
-    }
-    //
-    @Override
-    public void sendTransactionHandler(PtarmiganChannel channel, Transaction tx) {
-        logger.debug("[SEND TX]" + channel.toString());
-        logger.debug(tx.toString());
     }
 }
