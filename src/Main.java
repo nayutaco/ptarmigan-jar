@@ -36,7 +36,7 @@ public class Main
             ptarm.setCreationHash(dummyBytes);
             dummyInt = ptarm.getBlockCount(dummyBytes);
             dummyBytes = ptarm.getGenesisBlockHash();
-            dummyInt = ptarm.getTxConfirmation(dummyBytes);
+            dummyInt = ptarm.getTxConfirmation(dummyBytes, -1, null, 0);
             dummyChan = ptarm.getShortChannelParam(dummyBytes);
             dummyHash = ptarm.getTxidFromShortChannelId(0);
             dummySearch = ptarm.searchOutPoint(0, dummyBytes, 0);
