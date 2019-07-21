@@ -60,6 +60,7 @@ public class Ptarmigan {
     static private final int STARTUPLOG_BLOCK = 3;
     //
     static private final int DOWNLOAD_FAIL_COUNT_MAX = 10;
+    static private final int PEER_FAIL_COUNT_MAX = 6;
     //
     private NetworkParameters params;
     private WalletAppKit wak;
@@ -69,6 +70,7 @@ public class Ptarmigan {
     private HashMap<Sha256Hash, SendRawTxResult> mapSendTx = new HashMap<>();
     private Sha256Hash creationHash;
     private int downloadFailCount = 0;
+    private int peerFailCount = 0;
     private Logger logger;
 
     public class ShortChannelParam {
@@ -146,6 +148,10 @@ public class Ptarmigan {
     }
     //
     static class PtarmException extends Exception {
+        public PtarmException() {
+            System.out.println("PtarmException");
+            System.out.flush();
+        }
     }
     //
     interface JsonInterface {
@@ -393,9 +399,12 @@ public class Ptarmigan {
         logger.debug("setCreationHash()=" + creationHash.toString());
     }
     //
-    public int getBlockCount(byte[] blockHash) {
+    public int getBlockCount(byte[] blockHash) throws PtarmException {
         int blockHeight = wak.wallet().getLastBlockSeenHeight();
         logger.debug("getBlockCount()  count=" + blockHeight);
+        if (getPeer() == null) {
+            logger.error("  getBlockCount() - peer not found");
+        }
         if (blockHash != null) {
             byte[] bhashBytes;
             Sha256Hash bhash = wak.wallet().getLastBlockSeenHash();
@@ -561,7 +570,7 @@ public class Ptarmigan {
         return param;
     }
     // short_channel_idが指すtxid取得(bitcoinj試作：呼ばれない予定)
-    public Sha256Hash getTxidFromShortChannelId(long id) {
+    public Sha256Hash getTxidFromShortChannelId(long id) throws PtarmException {
         logger.debug("getTxidFromShortChannelId(): id=" + id);
         ShortChannelParam shortChannelId = new ShortChannelParam(id);
         int blks = wak.wallet().getLastBlockSeenHeight() - shortChannelId.height + 1;   // 現在のブロックでも1回
@@ -585,7 +594,7 @@ public class Ptarmigan {
         return null;
     }
     // ブロックから特定のoutpoint(txid,vIndex)をINPUT(vin[0])にもつtxを検索
-    public SearchOutPointResult searchOutPoint(int n, byte[] txhash, int vIndex) {
+    public SearchOutPointResult searchOutPoint(int n, byte[] txhash, int vIndex) throws PtarmException {
         Sha256Hash txHash = Sha256Hash.wrapReversed(txhash);
         logger.debug("searchOutPoint(): txid=" + txHash.toString() + ", n=" + n);
         SearchOutPointResult result = new SearchOutPointResult();
@@ -621,7 +630,7 @@ public class Ptarmigan {
         return result;
     }
     //
-    public List<byte[]> searchVout(int n, List<byte[]> vOut) {
+    public List<byte[]> searchVout(int n, List<byte[]> vOut) throws PtarmException {
         logger.debug("searchVout(): n=" + n + ", vOut.size=" + vOut.size());
         List<byte[]> txs = new ArrayList<>();
         Sha256Hash blockHash = wak.wallet().getLastBlockSeenHash();
@@ -665,7 +674,7 @@ public class Ptarmigan {
         return null;
     }
     // raw txの展開
-    public byte[] sendRawTx(byte[] txData) {
+    public byte[] sendRawTx(byte[] txData) throws PtarmException {
         logger.debug("sendRawTx(): " + Hex.toHexString(txData));
         Transaction tx = new Transaction(params, txData);
         try {
@@ -716,7 +725,7 @@ public class Ptarmigan {
         return null;
     }
     // txの展開済みチェック
-    public boolean checkBroadcast(byte[] peerId, byte[] txhash) {
+    public boolean checkBroadcast(byte[] peerId, byte[] txhash) throws PtarmException {
         Sha256Hash txHash = Sha256Hash.wrapReversed(txhash);
 
         logger.debug("checkBroadcast(): " + txHash.toString());
@@ -1018,7 +1027,7 @@ public class Ptarmigan {
         return wak.wallet().getBalance(Wallet.BalanceType.AVAILABLE_SPENDABLE).getValue();
     }
     // walletを空にするtxを作成して送信
-    public byte[] emptyWallet(String sendAddress) {
+    public byte[] emptyWallet(String sendAddress) throws PtarmException {
         logger.debug("emptyWallet(): sendAddress=" + sendAddress);
         Transaction tx = null;
         try {
@@ -1140,7 +1149,7 @@ public class Ptarmigan {
         }
     }
     // Block取得
-    private Block getBlock(Sha256Hash blockHash) {
+    private Block getBlock(Sha256Hash blockHash) throws PtarmException {
         logger.debug("getBlock():" + blockHash);
         if (blockCache.containsKey(blockHash)) {
             logger.debug("  getBlock() - blockCache: " + blockHash.toString());
@@ -1152,7 +1161,7 @@ public class Ptarmigan {
         }
     }
     // Tx取得
-    private Transaction getTransaction(Sha256Hash minedHash, Sha256Hash txHash) {
+    private Transaction getTransaction(Sha256Hash minedHash, Sha256Hash txHash) throws PtarmException {
         // Tx Cache
         logger.debug("getTransaction(): " + txHash);
         if (txCache.containsKey(txHash)) {
@@ -1194,10 +1203,10 @@ public class Ptarmigan {
         return null;
     }
     // MempoolからTx取得
-    private Transaction getPeerMempoolTransaction(Sha256Hash txHash) {
+    private Transaction getPeerMempoolTransaction(Sha256Hash txHash) throws PtarmException {
         logger.debug("getPeerMempoolTransaction(): " + txHash);
+        Peer peer = getPeer();
         try {
-            Peer peer = wak.peerGroup().getDownloadPeer();
             if (peer == null) {
                 logger.error("  getPeerMempoolTransaction() - peer not found");
                 return null;
@@ -1321,10 +1330,10 @@ public class Ptarmigan {
         return COMMITTXID_MAX;
     }
     //
-    private Block getBlockFromPeer(Sha256Hash blockHash) {
+    private Block getBlockFromPeer(Sha256Hash blockHash) throws PtarmException {
         Block block = null;
+        Peer peer = getPeer();
         try {
-            Peer peer = wak.peerGroup().getDownloadPeer();
             if (peer == null) {
                 logger.error("  getBlockFromPeer() - peer not found");
                 return null;
@@ -1340,6 +1349,20 @@ public class Ptarmigan {
             logger.error("getBlockFromPeer(count=" + downloadFailCount + "): " + getStackTrace(e));
         }
         return block;
+    }
+    //
+    private Peer getPeer() throws PtarmException {
+        Peer peer = wak.peerGroup().getDownloadPeer();
+        if (peer != null) {
+            peerFailCount = 0;
+        } else {
+            peerFailCount++;
+            logger.error("  getPeer(count=" + peerFailCount + ") - peer not found");
+            if (peerFailCount > PEER_FAIL_COUNT_MAX) {
+                throw new PtarmException();
+            }
+        }
+        return peer;
     }
     //debug
     private void debugShowRegisteredChannel() {
