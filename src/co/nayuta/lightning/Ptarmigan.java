@@ -360,7 +360,7 @@ public class Ptarmigan {
             saveDownloadLog(STARTUPLOG_CONT, "done.");
         } else {
             System.err.println("fail: bitcoinj start");
-            saveDownloadLog(STARTUPLOG_STOP, "fail DL");
+            saveDownloadLog(STARTUPLOG_STOP, "*restart DL");
         }
         return ret;
     }
