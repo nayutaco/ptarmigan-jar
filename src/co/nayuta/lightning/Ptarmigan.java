@@ -404,6 +404,7 @@ public class Ptarmigan {
         logger.debug("getBlockCount()  count=" + blockHeight);
         if (getPeer() == null) {
             logger.error("  getBlockCount() - peer not found");
+            blockHeight = 0;
         }
         if (blockHash != null) {
             byte[] bhashBytes;
