@@ -478,11 +478,6 @@ public class Ptarmigan {
             while (true) {
                 Block block = getBlock(blockHash);
                 if (block == null) {
-                    if (downloadFailCount >= DOWNLOAD_FAIL_COUNT_MAX) {
-                        //
-                        logger.error("stop SPV: too many fail download");
-                        throw new PtarmException();
-                    }
                     break;
                 }
                 logger.debug("getTxConfirmationFromBlock: blockHash(conf=" + (c + 1) + ")=" + blockHash.toString());
@@ -1348,6 +1343,11 @@ public class Ptarmigan {
         } catch (Exception e) {
             downloadFailCount++;
             logger.error("getBlockFromPeer(count=" + downloadFailCount + "): " + getStackTrace(e));
+            if (downloadFailCount >= DOWNLOAD_FAIL_COUNT_MAX) {
+                //
+                logger.error("stop SPV: too many fail download");
+                throw new PtarmException();
+            }
         }
         return block;
     }
