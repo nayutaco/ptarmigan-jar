@@ -8,6 +8,7 @@ import org.bitcoinj.script.Script;
 import org.bitcoinj.store.BlockStore;
 import org.bitcoinj.store.BlockStoreException;
 import org.bitcoinj.utils.Threading;
+import org.bitcoinj.wallet.DeterministicSeed;
 import org.bitcoinj.wallet.KeyChainGroupStructure;
 import org.bitcoinj.wallet.SendRequest;
 import org.bitcoinj.wallet.Wallet;
@@ -53,6 +54,7 @@ public class Ptarmigan {
     static private final int RETRY_SENDRAWTX = 3;
     //
     static private final String FILE_STARTUP = "bitcoinj_startup.log";
+    static private final String FILE_MNEMONIC = "bitcoinj_mnemonic.txt";
     static private final String WALLET_PREFIX = "ptarm_p2wpkh";
     //
     static private final int STARTUPLOG_CONT = 1;
@@ -358,6 +360,7 @@ public class Ptarmigan {
         if (ret == SPV_START_OK) {
             System.out.println("\nblock downloaded(" + blockHeight + ")");
             saveDownloadLog(STARTUPLOG_CONT, "done.");
+            saveSeedMnemonic(wak.wallet());
         } else {
             System.err.println("fail: bitcoinj start");
             saveDownloadLog(STARTUPLOG_STOP, "*restart DL");
@@ -1374,5 +1377,18 @@ public class Ptarmigan {
             //logger.debug("       fund:" + ((fundingOutpoint != null) ? fundingOutpoint.toString() : "no-fundtx") + ":" + ch.getShortChannelId().vIndex);
         }
         logger.debug("===== debugShowRegisteredChannel: end =====");
+    }
+    // save mnemonic
+    private void saveSeedMnemonic(Wallet wallet) {
+        try {
+            DeterministicSeed seed = wak.wallet().getKeyChainSeed();
+            String mnemonic = Utils.SPACE_JOINER.join(seed.getMnemonicCode());
+
+            FileWriter fileWriter = new FileWriter("./" + FILE_MNEMONIC, false);
+            fileWriter.write(mnemonic);
+            fileWriter.close();
+        } catch (IOException e) {
+            logger.error("FileWriter: "+ getStackTrace(e));
+        }
     }
 }
