@@ -1,10 +1,7 @@
 import co.nayuta.lightning.Ptarmigan;
-import org.bitcoinj.core.Sha256Hash;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeoutException;
 
 public class Main
 {
@@ -28,7 +25,6 @@ public class Main
             byte[] dummyBytes = null;
             Ptarmigan.ShortChannelParam dummyChan = null;
             Ptarmigan.SearchOutPointResult dummySearch = null;
-            Sha256Hash dummyHash = null;
             List<byte[]> listDummy = null;
             boolean dummyBool = false;
             long dummyLong = 0;
@@ -38,7 +34,7 @@ public class Main
             dummyBytes = ptarm.getGenesisBlockHash();
             dummyInt = ptarm.getTxConfirmation(dummyBytes, -1, null, 0);
             dummyChan = ptarm.getShortChannelParam(dummyBytes);
-            dummyHash = ptarm.getTxidFromShortChannelId(0);
+            dummyBytes = ptarm.getTxidFromShortChannelId(0);
             dummySearch = ptarm.searchOutPoint(0, dummyBytes, 0);
             listDummy = ptarm.searchVout(0, new ArrayList<byte[]>());
             dummyBytes = ptarm.signRawTx(0, dummyBytes);

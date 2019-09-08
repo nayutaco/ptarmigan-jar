@@ -121,7 +121,7 @@ public class Ptarmigan {
         //
         SearchOutPointResult() {
             this.height = 0;
-            tx = null;
+            this.tx = null;
         }
     }
     //
@@ -432,7 +432,11 @@ public class Ptarmigan {
     /** confirmation数取得.
      *
      * @param txhash target TXID
-     * @return 取得できない場合0を返す
+     * @param voutIndex (not -1)funding_tx:index, (-1)not funding_tx
+     * @param voutWitProg (funding_tx)outpoint witnessProgram
+     * @param amount (funding_tx)outpoint amount
+     * @return !0:confirmation, 0:error or fail get confirmation
+     * @throws PtarmException peer not found count > PEER_FAIL_COUNT_MAX
      */
     public int getTxConfirmation(byte[] txhash, int voutIndex, byte[] voutWitProg, long amount) throws PtarmException {
         Sha256Hash txHash = Sha256Hash.wrapReversed(txhash);
@@ -451,6 +455,8 @@ public class Ptarmigan {
                         logger.debug("getTxConfirmation:   cached conf=" + ch.getConfirmation());
                         mapChannel.put(Hex.toHexString(ch.peerNodeId()), ch);
                         return ch.getConfirmation();
+                    } else {
+                        logger.debug("getTxConfirmation(): no short_channel");
                     }
                     matchChannel = ch;
                     break;
@@ -462,7 +468,17 @@ public class Ptarmigan {
         logger.debug("fail ---> get from block");
         return getTxConfirmationFromBlock(matchChannel, txHash, voutIndex, voutWitProg, amount);
     }
-    //
+
+    /**
+     *
+     * @param channel (not null)target funding_tx, (null)only get confirmation
+     * @param txHash outpoint:txid
+     * @param voutIndex (not -1)funding_tx:index, (-1)not funding_tx
+     * @param voutWitProg: (voutIndex != -1)outpoint:witnessProgram
+     * @param amount: (voutIndex != -1)outpoint:amount
+     * @return !0:confirmation, 0:error or fail get confirmation
+     * @throws PtarmException peer not found count > PEER_FAIL_COUNT_MAX
+     */
     private int getTxConfirmationFromBlock(PtarmiganChannel channel, Sha256Hash txHash, int voutIndex, byte[] voutWitProg, long amount) throws PtarmException {
         try {
             logger.debug("getTxConfirmationFromBlock(): txid=" + txHash.toString());
@@ -481,6 +497,7 @@ public class Ptarmigan {
             while (true) {
                 Block block = getBlock(blockHash);
                 if (block == null) {
+                    logger.error("getTxConfirmationFromBlock: fail block");
                     break;
                 }
                 logger.debug("getTxConfirmationFromBlock: blockHash(conf=" + (c + 1) + ")=" + blockHash.toString());
@@ -569,7 +586,7 @@ public class Ptarmigan {
         return param;
     }
     // short_channel_idが指すtxid取得(bitcoinj試作：呼ばれない予定)
-    public Sha256Hash getTxidFromShortChannelId(long id) throws PtarmException {
+    public byte[] getTxidFromShortChannelId(long id) throws PtarmException {
         logger.debug("getTxidFromShortChannelId(): id=" + id);
         ShortChannelParam shortChannelId = new ShortChannelParam(id);
         int blks = wak.wallet().getLastBlockSeenHeight() - shortChannelId.height + 1;   // 現在のブロックでも1回
@@ -587,7 +604,7 @@ public class Ptarmigan {
         }
         if (block != null) {
             logger.debug("getTxidFromShortChannelId(): get");
-            return block.getTransactions().get(shortChannelId.bIndex).getTxId();
+            return block.getTransactions().get(shortChannelId.bIndex).getTxId().getReversedBytes();
         }
         logger.error("getTxidFromShortChannelId(): fail");
         return null;
@@ -937,6 +954,8 @@ public class Ptarmigan {
                     StoredBlock sb = bs.get(blockHash);
                     if (sb != null) {
                         minedHeight = sb.getHeight();
+                    } else {
+                        logger.error("setChannel: fail StoredBlock");
                     }
                 } catch (BlockStoreException e) {
                     logger.error("setChannel 1: " + getStackTrace(e));
@@ -978,7 +997,13 @@ public class Ptarmigan {
             channel.initialize(shortChannelId, fundingOutpoint, (txRaw == null));
             channel.setMinedBlockHash(blockHash, minedHeight, -1);
             if (minedHeight > 0) {
+                logger.debug("setChannel: minedConfirm");
                 channel.setConfirmation(blockHeight - minedHeight + 1);
+            } else if (lastConfirm > 0) {
+                logger.debug("setChannel: lastConfirm");
+                channel.setConfirmation(lastConfirm);
+            } else {
+                logger.debug("setChannel: confirm not set");
             }
             try {
                 SegwitAddress address = SegwitAddress.fromHash(params, scriptPubKey);
@@ -987,7 +1012,7 @@ public class Ptarmigan {
                 logger.error("setChannel 2: " + getStackTrace(e));
             }
             mapChannel.put(Hex.toHexString(channel.peerNodeId()), channel);
-            logger.debug("add channel: " + Hex.toHexString(peerId));
+            logger.debug("setChannel: add channel: " + Hex.toHexString(peerId));
 
             if (!channel.getFundingTxUnspent()) {
                 checkUnspentFromBlock(channel, fundingOutpoint.getHash(), vIndex);
@@ -997,6 +1022,7 @@ public class Ptarmigan {
         } catch (Exception e) {
             logger.error("setChannel: " + getStackTrace(e));
         }
+        logger.debug("setChannel: exit");
     }
     //
     // チャネル情報削除
@@ -1332,11 +1358,11 @@ public class Ptarmigan {
     private Block getBlockFromPeer(Sha256Hash blockHash) throws PtarmException {
         Block block = null;
         Peer peer = getPeer();
+        if (peer == null) {
+            logger.error("  getBlockFromPeer() - peer not found");
+            return null;
+        }
         try {
-            if (peer == null) {
-                logger.error("  getBlockFromPeer() - peer not found");
-                return null;
-            }
             block = peer.getBlock(blockHash).get(TIMEOUT_GET, TimeUnit.MILLISECONDS);
             if (block != null) {
                 logger.debug("  getBlockFromPeer() " + blockHash.toString());
