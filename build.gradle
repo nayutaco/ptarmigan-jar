@@ -14,8 +14,8 @@ repositories {
 }
 
 dependencies {
-    compile group: 'org.bitcoinj', name: 'bitcoinj-core', version: '0.15.2'
-    compile group: 'org.slf4j', name: 'slf4j-simple', version: '1.7.26'
+    compile group: 'org.bitcoinj', name: 'bitcoinj-core', version: '0.15.3'
+    compile group: 'org.slf4j', name: 'slf4j-simple', version: '1.7.28'
     compile group: 'org.bouncycastle', name: 'bcprov-jdk15on', version: '1.61'
     compile 'com.squareup.moshi:moshi:1.8.0'
 }
