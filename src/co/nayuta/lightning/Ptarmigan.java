@@ -126,7 +126,7 @@ public class Ptarmigan {
 
 
     /**************************************************************************
-     * Ptarmigan class
+     * ctor
      **************************************************************************/
 
     public Ptarmigan() {
@@ -143,6 +143,11 @@ public class Ptarmigan {
     }
 
 
+    /**
+     *
+     * @param pmtProtocolId
+     * @return
+     */
     public int spv_start(String pmtProtocolId) {
         logger.info("spv_start: " + pmtProtocolId);
         params = NetworkParameters.fromPmtProtocolID(pmtProtocolId);
@@ -279,12 +284,24 @@ public class Ptarmigan {
         }
         return returnValue;
     }
-    //
+
+
+    /**
+     *
+     * @param blockHash
+     */
     public void setCreationHash(byte[] blockHash) {
         creationHash = Sha256Hash.wrapReversed(blockHash);
         logger.debug("setCreationHash()=" + creationHash.toString());
     }
-    //
+
+
+    /**
+     *
+     * @param blockHash
+     * @return
+     * @throws PtarmException
+     */
     public int getBlockCount(byte[] blockHash) throws PtarmException {
         int blockHeight = wak.wallet().getLastBlockSeenHeight();
         logger.debug("getBlockCount()  count=" + blockHeight);
@@ -306,12 +323,19 @@ public class Ptarmigan {
         }
         return blockHeight;
     }
-    // genesis block hash取得
+
+
+    /** genesis block hash取得
+     *
+     * @return
+     */
     public byte[] getGenesisBlockHash() {
         Sha256Hash hash = wak.params().getGenesisBlock().getHash();
         logger.debug("getGenesisBlockHash()  hash=" + hash.toString());
         return hash.getReversedBytes();
     }
+
+
     /** confirmation数取得.
      *
      * @param txhash target TXID
@@ -351,6 +375,7 @@ public class Ptarmigan {
         logger.debug("fail ---> get from block");
         return getTxConfirmationFromBlock(matchChannel, txHash, voutIndex, voutWitProg, amount);
     }
+
 
     /**
      *
@@ -449,7 +474,13 @@ public class Ptarmigan {
         logger.error("getTxConfirmationFromBlock: fail confirm");
         return 0;
     }
-    // short_channel_id計算用パラメータ取得
+
+
+    /** short_channel_id計算用パラメータ取得
+     *
+     * @param peerId
+     * @return
+     */
     public ShortChannelParam getShortChannelParam(byte[] peerId) {
         logger.debug("getShortChannelParam() peerId=" + Hex.toHexString(peerId));
         PtarmiganChannel ch = mapChannel.get(Hex.toHexString(peerId));
@@ -468,7 +499,14 @@ public class Ptarmigan {
         }
         return param;
     }
-    // short_channel_idが指すtxid取得(bitcoinj試作：呼ばれない予定)
+
+
+    /** short_channel_idが指すtxid取得(bitcoinj試作：呼ばれない予定)
+     *
+     * @param id
+     * @return
+     * @throws PtarmException
+     */
     public byte[] getTxidFromShortChannelId(long id) throws PtarmException {
         logger.debug("getTxidFromShortChannelId(): id=" + id);
         ShortChannelParam shortChannelId = new ShortChannelParam(id);
@@ -492,7 +530,16 @@ public class Ptarmigan {
         logger.error("getTxidFromShortChannelId(): fail");
         return null;
     }
-    // ブロックから特定のoutpoint(txid,vIndex)をINPUT(vin[0])にもつtxを検索
+
+
+    /** ブロックから特定のoutpoint(txid,vIndex)をINPUT(vin[0])にもつtxを検索
+     *
+     * @param n
+     * @param txhash
+     * @param vIndex
+     * @return
+     * @throws PtarmException
+     */
     public SearchOutPointResult searchOutPoint(int n, byte[] txhash, int vIndex) throws PtarmException {
         Sha256Hash txHash = Sha256Hash.wrapReversed(txhash);
         logger.debug("searchOutPoint(): txid=" + txHash.toString() + ", n=" + n);
@@ -528,7 +575,15 @@ public class Ptarmigan {
         }
         return result;
     }
-    //
+
+
+    /**
+     *
+     * @param n
+     * @param vOut
+     * @return
+     * @throws PtarmException
+     */
     public List<byte[]> searchVout(int n, List<byte[]> vOut) throws PtarmException {
         logger.debug("searchVout(): n=" + n + ", vOut.size=" + vOut.size());
         List<byte[]> txs = new ArrayList<>();
@@ -553,7 +608,14 @@ public class Ptarmigan {
         logger.debug("  txs=" + txs.size());
         return txs;
     }
-    // funding_txを作成
+
+
+    /** funding_txを作成
+     *
+     * @param amount
+     * @param scriptPubKey
+     * @return
+     */
     public byte[] signRawTx(long amount, byte[] scriptPubKey) {
         try {
             long feeRatePerKb = estimateFee();
@@ -572,7 +634,14 @@ public class Ptarmigan {
         }
         return null;
     }
-    // raw txの展開
+
+
+    /** raw txの展開
+     *
+     * @param txData
+     * @return
+     * @throws PtarmException
+     */
     public byte[] sendRawTx(byte[] txData) throws PtarmException {
         logger.debug("sendRawTx(): " + Hex.toHexString(txData));
         Transaction tx = new Transaction(params, txData);
@@ -623,7 +692,15 @@ public class Ptarmigan {
         logger.error("sendRawTx(): fail");
         return null;
     }
-    // txの展開済みチェック
+
+
+    /** txの展開済みチェック
+     *
+     * @param peerId
+     * @param txhash
+     * @return
+     * @throws PtarmException
+     */
     public boolean checkBroadcast(byte[] peerId, byte[] txhash) throws PtarmException {
         Sha256Hash txHash = Sha256Hash.wrapReversed(txhash);
 
@@ -664,8 +741,15 @@ public class Ptarmigan {
         logger.debug("  broadcast(get txs)=" + ((tx != null) ? "YES" : "NO"));
         return tx != null;
     }
-    // 指定したtxのunspentチェック
-    //
+
+
+    /** 指定したtxのunspentチェック
+     *
+     * @param peerId
+     * @param txhash
+     * @param vIndex
+     * @return
+     */
     public int checkUnspent(byte[] peerId, byte[] txhash, int vIndex) {
         int retval;
         Sha256Hash txHash = Sha256Hash.wrapReversed(txhash);
@@ -701,6 +785,15 @@ public class Ptarmigan {
         retval = checkUnspentFromBlock(null, txHash, vIndex);
         return retval;
     }
+
+
+    /**
+     *
+     * @param ch
+     * @param txHash
+     * @param vIndex
+     * @return
+     */
     private int checkUnspentChannel(PtarmiganChannel ch, Sha256Hash txHash, int vIndex) {
         //TransactionOutPoint chkOutpoint = new TransactionOutPoint(params, vIndex, txHash);
         TransactionOutPoint fundingOutpoint = new TransactionOutPoint(params, vIndex, txHash);
@@ -718,8 +811,15 @@ public class Ptarmigan {
         }
         return CHECKUNSPENT_FAIL;
     }
-    // 指定したtxのunspentチェック
-    //      blockCacheの各blockからvinをチェックする
+
+
+    /** 指定したtxのunspentチェック
+     *      blockCacheの各blockからvinをチェックする
+     * @param ch
+     * @param txHash
+     * @param vIndex
+     * @return
+     */
     private int checkUnspentFromBlock(PtarmiganChannel ch, Sha256Hash txHash, int vIndex) {
         logger.debug("checkUnspentFromBlock(): txid=" + txHash.toString() + " : " + vIndex);
         ArrayList<Sha256Hash> keyList = new ArrayList<>(blockCache.keySet());
@@ -756,7 +856,12 @@ public class Ptarmigan {
         logger.debug("checkUnspentFromBlock(): vin not found");
         return CHECKUNSPENT_UNSPENT;
     }
-    // 受信アドレス取得(scriptPubKey)
+
+
+    /** 受信アドレス取得(scriptPubKey)
+     *
+     * @return
+     */
     public String getNewAddress() {
         try {
             wak.wallet().currentReceiveKey();
@@ -766,7 +871,12 @@ public class Ptarmigan {
             return "fail";
         }
     }
-    // feerate per 1000byte
+
+
+    /** feerate per 1000byte
+     *
+     * @return
+     */
     public long estimateFee() {
         long returnFeeKb;
         FeeRate.JsonInterface jsonInterface;
@@ -783,9 +893,9 @@ public class Ptarmigan {
         logger.debug("feerate=" + returnFeeKb);
         return returnFeeKb;
     }
-    // チャネル情報追加
 
-    /**
+
+    /** チャネル情報追加
      *
      * @param peerId channel peer node_id
      * @param shortChannelId short_channel_id
@@ -890,8 +1000,12 @@ public class Ptarmigan {
         }
         logger.debug("setChannel: exit");
     }
-    //
-    // チャネル情報削除
+
+
+    /** チャネル情報削除
+     *
+     * @param peerId
+     */
     public void delChannel(byte[] peerId) {
         PtarmiganChannel channel = mapChannel.get(Hex.toHexString(peerId));
         if (channel != null) {
@@ -901,7 +1015,15 @@ public class Ptarmigan {
             logger.debug("no such channel: " + Hex.toHexString(peerId));
         }
     }
-    // 監視tx登録
+
+
+    /** 監視tx登録
+     *
+     * @param peerId
+     * @param index
+     * @param commitNum
+     * @param txHash
+     */
     public void setCommitTxid(byte[] peerId, int index, int commitNum, Sha256Hash txHash) {
         PtarmiganChannel channel = mapChannel.get(Hex.toHexString(peerId));
         if (channel != null) {
@@ -909,7 +1031,12 @@ public class Ptarmigan {
             mapChannel.put(Hex.toHexString(channel.peerNodeId()), channel);
         }
     }
-    // balance取得
+
+
+    /** balance取得
+     *
+     * @return
+     */
     public long getBalance() {
         logger.debug("getBalance(): available=" + wak.wallet().getBalance(Wallet.BalanceType.AVAILABLE).getValue());
         logger.debug("             +spendable=" + wak.wallet().getBalance(Wallet.BalanceType.AVAILABLE_SPENDABLE).getValue());
@@ -917,7 +1044,14 @@ public class Ptarmigan {
         logger.debug("             +spendable=" + wak.wallet().getBalance(Wallet.BalanceType.ESTIMATED_SPENDABLE).getValue());
         return wak.wallet().getBalance(Wallet.BalanceType.AVAILABLE_SPENDABLE).getValue();
     }
-    // walletを空にするtxを作成して送信
+
+
+    /** walletを空にするtxを作成して送信
+     *
+     * @param sendAddress
+     * @return
+     * @throws PtarmException
+     */
     public byte[] emptyWallet(String sendAddress) throws PtarmException {
         logger.debug("emptyWallet(): sendAddress=" + sendAddress);
         Transaction tx = null;
@@ -945,9 +1079,15 @@ public class Ptarmigan {
         logger.error("emptyWallet(): fail");
         return null;
     }
+
+
     //-------------------------------------------------------------------------
     // Private
     //-------------------------------------------------------------------------
+
+    /**
+     *
+     */
     private void setCallbackFunctions() {
         logger.info("set callbacks");
         wak.peerGroup().addBlocksDownloadedEventListener((peer, block, filteredBlock, blocksLeft) -> {
@@ -1015,7 +1155,12 @@ public class Ptarmigan {
         logger.info("set callbacks: end");
     }
 
-    // save block download logfile
+
+    /** save block download logfile
+     *
+     * @param logPrefix
+     * @param str
+     */
     private void saveDownloadLog(int logPrefix, String str) {
         try {
             FileWriter fileWriter = new FileWriter("./logs/" + FILE_STARTUP, false);
@@ -1039,7 +1184,14 @@ public class Ptarmigan {
             logger.error("FileWriter:" + str);
         }
     }
-    // Block取得
+
+
+    /** Block取得
+     *
+     * @param blockHash
+     * @return
+     * @throws PtarmException
+     */
     private Block getBlock(Sha256Hash blockHash) throws PtarmException {
         logger.debug("getBlock():" + blockHash);
         if (blockCache.containsKey(blockHash)) {
@@ -1051,7 +1203,15 @@ public class Ptarmigan {
             return block;
         }
     }
-    // Tx取得
+
+
+    /** Tx取得
+     *
+     * @param minedHash
+     * @param txHash
+     * @return
+     * @throws PtarmException
+     */
     private Transaction getTransaction(Sha256Hash minedHash, Sha256Hash txHash) throws PtarmException {
         // Tx Cache
         logger.debug("getTransaction(): " + txHash);
@@ -1093,7 +1253,14 @@ public class Ptarmigan {
         }
         return null;
     }
-    // MempoolからTx取得
+
+
+    /** MempoolからTx取得
+     *
+     * @param txHash
+     * @return
+     * @throws PtarmException
+     */
     private Transaction getPeerMempoolTransaction(Sha256Hash txHash) throws PtarmException {
         logger.debug("getPeerMempoolTransaction(): " + txHash);
         Peer peer = getPeer();
@@ -1108,15 +1275,30 @@ public class Ptarmigan {
         }
         return null;
     }
-    // 着金時処理
+
+
+    /** 着金時処理
+     *
+     * @param txRecv
+     */
     private void recvEvent(Transaction txRecv) {
         findRegisteredTx(txRecv);
     }
-    // 送金時処理
+
+
+    /** 送金時処理
+     *
+     * @param txSend
+     */
     private void sendEvent(Transaction txSend) {
         findRegisteredTx(txSend);
     }
-    //
+
+
+    /**
+     *
+     * @param targetTx
+     */
     private void findRegisteredTx(Transaction targetTx) {
         TransactionOutPoint targetOutpointTxid = targetTx.getInput(0).getOutpoint();
         logger.debug("findRegisteredTx(): txid=" + targetOutpointTxid.getHash().toString());
@@ -1146,9 +1328,13 @@ public class Ptarmigan {
             }
         }
     }
-    //
-    //このタイミングでは引数のblockHashとWallet#getLastBlockSeenHash()は必ずしも一致しない。
-    //すなわち、Wallet#getLastBlockSeenHeight()とも一致しないということである。
+
+
+    /**
+     *  このタイミングでは引数のblockHashとWallet#getLastBlockSeenHash()は必ずしも一致しない。
+     *  すなわち、Wallet#getLastBlockSeenHeight()とも一致しないということである。
+     * @param blockHash
+     */
     private void blockDownloadEvent(Sha256Hash blockHash) {
         logger.debug("===== blockDownloadEvent(block=" + blockHash.toString() + ")");
 //
@@ -1197,7 +1383,12 @@ public class Ptarmigan {
 //            logger.debug(" --> " + ch.getConfirmation());
 //        }
     }
-    //
+
+
+    /**
+     *
+     * @param message
+     */
     private void messageRejectEvent(RejectMessage message) {
         logger.debug("messageRejectEvent");
         logger.debug("  " + message.getRejectedObjectHash());
@@ -1211,7 +1402,14 @@ public class Ptarmigan {
             retSendTx.unlock();
         }
     }
-    // Txのspent登録チェック
+
+
+    /** Txのspent登録チェック
+     *
+     * @param ch
+     * @param txidHash
+     * @return
+     */
     private int checkCommitTxids(PtarmiganChannel ch, Sha256Hash txidHash) {
         for (int i = COMMITTXID_LOCAL; i < COMMITTXID_MAX; i++) {
             if ((ch.getCommitTxid(i).txid != null) && ch.getCommitTxid(i).txid.equals(txidHash)) {
@@ -1220,7 +1418,14 @@ public class Ptarmigan {
         }
         return COMMITTXID_MAX;
     }
-    //
+
+
+    /**
+     *
+     * @param blockHash
+     * @return
+     * @throws PtarmException
+     */
     private Block getBlockFromPeer(Sha256Hash blockHash) throws PtarmException {
         Block block = null;
         Peer peer = getPeer();
@@ -1245,7 +1450,13 @@ public class Ptarmigan {
         }
         return block;
     }
-    //
+
+
+    /**
+     *
+     * @return
+     * @throws PtarmException
+     */
     private Peer getPeer() throws PtarmException {
         Peer peer = wak.peerGroup().getDownloadPeer();
         if (peer != null) {
@@ -1259,7 +1470,11 @@ public class Ptarmigan {
         }
         return peer;
     }
-    //debug
+
+
+    /** debug
+     *
+     */
     private void debugShowRegisteredChannel() {
         logger.debug("===== debugShowRegisteredChannel =====");
         for (PtarmiganChannel ch : mapChannel.values()) {
@@ -1269,7 +1484,12 @@ public class Ptarmigan {
         }
         logger.debug("===== debugShowRegisteredChannel: end =====");
     }
-    // save mnemonic
+
+
+    /**  save mnemonic
+     *
+     * @param wallet
+     */
     private void saveSeedMnemonic(Wallet wallet) {
         DeterministicSeed seed = wallet.getKeyChainSeed();
         if ((seed == null) || (seed.getMnemonicCode() == null)) {
