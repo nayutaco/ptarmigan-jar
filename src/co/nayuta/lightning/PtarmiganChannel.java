@@ -8,14 +8,14 @@ import org.slf4j.LoggerFactory;
 
 public class PtarmiganChannel {
     //
-    class CommitTxid {
+    static class CommitTxid {
         int commitNum = 0;
         Sha256Hash txid = null;
         Boolean unspent = true;
     }
     //
     private byte[] peerNodeId;
-    private Ptarmigan.ShortChannelParam shortChannelId;
+    private ShortChannelParam shortChannelId;
     private boolean fundingTxUnspent = true;
     private int confirmation = -1;
     private CommitTxid[] commitTxids = new CommitTxid[Ptarmigan.COMMITTXID_MAX];
@@ -23,7 +23,7 @@ public class PtarmiganChannel {
     private Sha256Hash minedHash = Sha256Hash.ZERO_HASH;
     private Logger logger;
     //
-    PtarmiganChannel(byte[] peerNodeId, Ptarmigan.ShortChannelParam shortChannelId) {
+    PtarmiganChannel(byte[] peerNodeId, ShortChannelParam shortChannelId) {
         logger = LoggerFactory.getLogger(this.getClass());
 
         logger.debug("PtarmiganChannel ctor");
@@ -54,7 +54,7 @@ public class PtarmiganChannel {
         logger.debug("  confirmation=" + this.confirmation);
     }
     //
-    Ptarmigan.ShortChannelParam getShortChannelId() {
+    ShortChannelParam getShortChannelId() {
         if ( (this.confirmation > 0) && this.shortChannelId.isAvailable() ) {
             return this.shortChannelId;
         } else {
