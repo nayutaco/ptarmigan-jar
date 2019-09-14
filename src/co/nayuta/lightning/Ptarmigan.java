@@ -26,7 +26,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 public class Ptarmigan {
-    static public final String VERSION = "0.0.4.x";
+    private static final String VERSION = "0.0.4.x";
     //
     static public final int CHECKUNSPENT_FAIL = -1;
     static public final int CHECKUNSPENT_UNSPENT = 0;
@@ -110,7 +110,7 @@ public class Ptarmigan {
             return String.format("height:%d, bIndex:%d, vIndex:%d", height, bIndex, vIndex);
         }
     }
-    public class SearchOutPointResult {
+    public static class SearchOutPointResult {
         int height;
         byte[] tx;
         //
@@ -146,7 +146,7 @@ public class Ptarmigan {
     }
     //
     static class PtarmException extends Exception {
-        public PtarmException() {
+        PtarmException() {
             System.out.println("PtarmException");
             System.out.flush();
         }
@@ -1295,10 +1295,13 @@ public class Ptarmigan {
     }
     // save mnemonic
     private void saveSeedMnemonic(Wallet wallet) {
+        DeterministicSeed seed = wallet.getKeyChainSeed();
+        if ((seed == null) || (seed.getMnemonicCode() == null)) {
+            logger.error("mnemonic null");
+            return;
+        }
+        String mnemonic = Utils.SPACE_JOINER.join(seed.getMnemonicCode());
         try {
-            DeterministicSeed seed = wak.wallet().getKeyChainSeed();
-            String mnemonic = Utils.SPACE_JOINER.join(seed.getMnemonicCode());
-
             FileWriter fileWriter = new FileWriter("./" + FILE_MNEMONIC, false);
             fileWriter.write(mnemonic);
             fileWriter.close();
