@@ -1,4 +1,5 @@
 import co.nayuta.lightning.Ptarmigan;
+import co.nayuta.lightning.ShortChannelParam;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -23,7 +24,7 @@ public class Main
         try {
             int dummyInt = 0;
             byte[] dummyBytes = null;
-            Ptarmigan.ShortChannelParam dummyChan = null;
+            ShortChannelParam dummyChan = null;
             Ptarmigan.SearchOutPointResult dummySearch = null;
             List<byte[]> listDummy = null;
             boolean dummyBool = false;
