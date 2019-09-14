@@ -72,6 +72,10 @@ public class Ptarmigan {
     private Logger logger;
 
 
+    /**************************************************************************
+     * result
+     **************************************************************************/
+
     public static class SearchOutPointResult {
         int height;
         byte[] tx;
@@ -106,14 +110,24 @@ public class Ptarmigan {
             this.latch.countDown();
         }
     }
-    //
+
+
+    /**************************************************************************
+     * exception
+     **************************************************************************/
+
     static class PtarmException extends Exception {
-        PtarmException() {
-            System.out.println("PtarmException");
+        PtarmException(String reason) {
+            System.out.println("PtarmException: " + reason);
             System.out.flush();
         }
     }
     //
+
+
+    /**************************************************************************
+     * Ptarmigan class
+     **************************************************************************/
 
     public Ptarmigan() {
         logger = LoggerFactory.getLogger(this.getClass());
@@ -127,7 +141,8 @@ public class Ptarmigan {
             //e.printStackTrace();
         }
     }
-    //
+
+
     public int spv_start(String pmtProtocolId) {
         logger.info("spv_start: " + pmtProtocolId);
         params = NetworkParameters.fromPmtProtocolID(pmtProtocolId);
@@ -1225,8 +1240,7 @@ public class Ptarmigan {
             logger.error("getBlockFromPeer(count=" + downloadFailCount + "): " + getStackTrace(e));
             if (downloadFailCount >= DOWNLOAD_FAIL_COUNT_MAX) {
                 //
-                logger.error("stop SPV: too many fail download");
-                throw new PtarmException();
+                throw new PtarmException("getBlockFromPeer: stop SPV: too many fail download");
             }
         }
         return block;
@@ -1240,7 +1254,7 @@ public class Ptarmigan {
             peerFailCount++;
             logger.error("  getPeer(count=" + peerFailCount + ") - peer not found");
             if (peerFailCount > PEER_FAIL_COUNT_MAX) {
-                throw new PtarmException();
+                throw new PtarmException("getPeer: too many fail peer");
             }
         }
         return peer;
