@@ -212,8 +212,8 @@ public class Ptarmigan {
     }
 
 
-    /**
-     * spv_start(): 2. block download
+    /** spv_start(): 2. block download
+     *
      * @return SPV_START_xxx
      */
     private int spv_start_download() {
@@ -363,7 +363,7 @@ public class Ptarmigan {
     }
 
 
-    /**
+    /** [event]
      *
      * @param targetTx  transaction
      */
@@ -377,7 +377,7 @@ public class Ptarmigan {
             }
             logger.debug("   ch txid=" + fundingOutpoint.toString());
             if (targetOutpointTxid.equals(fundingOutpoint)) {
-                logger.debug("  funding spent!");
+                logger.debug("findRegisteredTx() ----> SPENT funding_tx!");
                 ch.setFundingTxSpent();
             } else {
                 //おそらくこの部分は稼働していない(commit_txidを設定しないので)
@@ -604,33 +604,35 @@ public class Ptarmigan {
 
     /** get confirmation
      *
-     * return cached confirmation or block searched confirmation.
+     * 1. if already confirmed channel, return [current block height] - [short_channel_id height] + 1
+     * 2. count confirmation from block
      *
      * @param txhash target TXID
-     * @param voutIndex (not -1)funding_tx:index, (-1)not funding_tx
+     * @param vIndex (not -1)funding_tx:index, (-1)not funding_tx
      * @param voutWitProg (funding_tx)outpoint witnessProgram
      * @param amount (funding_tx)outpoint amount
      * @return !0:confirmation, 0:error or fail get confirmation
      * @throws PtarmException peer not found count > PEER_FAIL_COUNT_MAX
      */
-    public int getTxConfirmation(byte[] txhash, int voutIndex, byte[] voutWitProg, long amount) throws PtarmException {
+    public int getTxConfirmation(byte[] txhash, int vIndex, byte[] voutWitProg, long amount) throws PtarmException {
         Sha256Hash txHash = Sha256Hash.wrapReversed(txhash);
-        logger.debug("getTxConfirmation(): txid=" + txHash.toString());
+        logger.debug("getTxConfirmation(): txid=" + txHash.toString() + ", vIndex=" + vIndex);
 
-        PtarmiganChannel matchChannel = getChannelFromFundingTx(txHash);
-        if (matchChannel != null) {
-            if ((matchChannel.getShortChannelId() != null) && (matchChannel.getShortChannelId().height > 0)) {
-                int conf = wak.wallet().getLastBlockSeenHeight() - matchChannel.getShortChannelId().height + 1;
-                matchChannel.setConfirmation(conf);
-                logger.debug("getTxConfirmation:   cached conf=" + matchChannel.getConfirmation());
-                mapChannel.put(Hex.toHexString(matchChannel.peerNodeId()), matchChannel);
-                return matchChannel.getConfirmation();
+        PtarmiganChannel channel = getChannelFromFundingTx(txHash);
+        if (channel != null) {
+            if ((channel.getShortChannelId() != null) && (channel.getShortChannelId().height > 0)) {
+                // already confirmed ==> calculation from current block height
+                int conf = wak.wallet().getLastBlockSeenHeight() - channel.getShortChannelId().height + 1;
+                channel.setConfirmation(conf);
+                logger.debug("getTxConfirmation:   cached conf=" + channel.getConfirmation());
+                mapChannel.put(Hex.toHexString(channel.peerNodeId()), channel);
+                return channel.getConfirmation();
             } else {
                 logger.debug("getTxConfirmation(): no short_channel");
             }
         }
-        logger.debug("fail ---> get from block");
-        return getTxConfirmationFromBlock(matchChannel, txHash, voutIndex, voutWitProg, amount);
+        logger.debug("getTxConfirmation(): get from block");
+        return getTxConfirmationFromBlock(channel, txHash, vIndex, voutWitProg, amount);
     }
 
 
@@ -638,31 +640,38 @@ public class Ptarmigan {
      *
      * @param channel (not null)target funding_tx, (null)only get confirmation
      * @param txHash outpoint:txid
-     * @param voutIndex (not -1)funding_tx:index, (-1)not funding_tx
-     * @param voutWitProg: (voutIndex != -1)outpoint:witnessProgram
-     * @param amount: (voutIndex != -1)outpoint:amount
+     * @param vIndex (not -1)funding_tx:index, (-1)not funding_tx
+     * @param witnessProg: (vIndex != -1)outpoint:witnessProgram
+     * @param amount: (vIndex != -1)outpoint:amount
      * @return !0:confirmation, 0:error or fail get confirmation
      * @throws PtarmException peer not found count > PEER_FAIL_COUNT_MAX
      */
-    private int getTxConfirmationFromBlock(PtarmiganChannel channel, Sha256Hash txHash, int voutIndex, byte[] voutWitProg, long amount) throws PtarmException {
-        try {
-            logger.debug("getTxConfirmationFromBlock(): txid=" + txHash.toString());
-            if (channel != null) {
-                logger.debug("    fundingTxid=" + channel.getFundingOutpoint().toString());
-            } else {
-                logger.error("getTxConfirmationFromBlock: no channel");
-            }
+    private int getTxConfirmationFromBlock(
+            PtarmiganChannel channel,
+            Sha256Hash txHash, int vIndex,
+            byte[] witnessProg, long amount) throws PtarmException {
+        logger.debug("getTxConfirmationFromBlock(): txid=" + txHash.toString() + ", vIndex=" + vIndex);
+        Sha256Hash minedHash;
+        if (channel != null) {
+            minedHash = channel.getMinedBlockHash();
+            logger.debug("    fundingTxid=" + channel.getFundingOutpoint().toString());
+        } else {
+            minedHash = null;
+            logger.error("getTxConfirmationFromBlock: no channel");
+        }
+        Sha256Hash blockHash = wak.wallet().getLastBlockSeenHash();
+        if (blockHash == null) {
+            logger.error("getTxConfirmationFromBlock: fail block1");
+            return 0;
+        }
 
-            Sha256Hash blockHash = wak.wallet().getLastBlockSeenHash();
-            if (blockHash == null) {
-                return 0;
-            }
+        try {
             int blockHeight = wak.wallet().getLastBlockSeenHeight();
             int conf = 0;
             while (true) {
                 Block block = getBlock(blockHash);
                 if (block == null) {
-                    logger.error("getTxConfirmationFromBlock: fail block");
+                    logger.error("getTxConfirmationFromBlock: fail block2");
                     break;
                 }
                 logger.debug("getTxConfirmationFromBlock: blockHash(conf=" + (conf + 1) + ")=" + blockHash.toString());
@@ -671,39 +680,13 @@ public class Ptarmigan {
                     int bindex = 0;
                     for (Transaction tx0 : txs) {
                         if ((tx0 != null) && (tx0.getTxId().equals(txHash))) {
-                            // tx0.getConfidence()はnot nullでもdepthが0でしか返ってこなかった。
                             if ((channel != null) && channel.getFundingOutpoint().getHash().equals(tx0.getTxId())) {
-                                if (voutIndex != -1) {
-                                    //check vout
-                                    TransactionOutput vout = tx0.getOutput(voutIndex);
-                                    if (vout == null) {
-                                        logger.error("getTxConfirmationFromBlock: bad vout index");
-                                        return 0;
-                                    }
-                                    logger.debug("vout: " + vout.toString());
-                                    if (vout.getValue().value != amount) {
-                                        logger.error("getTxConfirmationFromBlock: bad amount");
-                                        return 0;
-                                    }
-                                    logger.debug("voutScript: " + Hex.toHexString(vout.getScriptBytes()));
-                                    if (vout.getScriptBytes().length != 34) {
-                                        logger.error("getTxConfirmationFromBlock: bad vout script length");
-                                        return 0;
-                                    }
-                                    if (!Arrays.equals(vout.getScriptBytes(), voutWitProg)) {
-                                        logger.error("getTxConfirmationFromBlock: bad vout script");
-                                        return 0;
-                                    }
-                                    logger.debug("vout check OK!");
+                                if (!getTxConfirmationCheck(tx0, vIndex, witnessProg, amount)) {
+                                    return 0;
                                 }
-                                channel.setMinedBlockHash(block.getHash(), blockHeight - conf, bindex);
-                                channel.setConfirmation(conf + 1);
-                                mapChannel.put(Hex.toHexString(channel.peerNodeId()), channel);
-                                logger.debug("getTxConfirmationFromBlock update: conf=" + channel.getConfirmation());
-                                logger.debug("CONF:funding_tx:" + tx0.toString());
-                                return channel.getConfirmation();
+                                return getTxConfirmationChannel(channel, block, bindex, blockHeight, conf);
                             } else {
-                                logger.debug("getTxConfirmationFromBlock not channel conf: " + (conf + 1));
+                                logger.debug("getTxConfirmationFromBlock(): not channel conf=" + (conf + 1));
                                 return conf + 1;
                             }
                         }
@@ -714,7 +697,7 @@ public class Ptarmigan {
                     logger.debug(" stop by creationHash");
                     break;
                 }
-                if ((channel != null) && blockHash.equals(channel.getMinedBlockHash())) {
+                if (blockHash.equals(minedHash)) {
                     logger.debug(" stop by minedHash");
                     break;
                 }
@@ -723,7 +706,7 @@ public class Ptarmigan {
                 conf++;
             }
         } catch (PtarmException e) {
-            logger.error("rethrow: " + getStackTrace(e));
+            logger.error("getTxConfirmationFromBlock: rethrow: " + getStackTrace(e));
             throw e;
         } catch (Exception e) {
             logger.error("getTxConfirmationFromBlock: " + getStackTrace(e));
@@ -732,6 +715,42 @@ public class Ptarmigan {
         return 0;
     }
 
+
+    private boolean getTxConfirmationCheck(Transaction tx, int vIndex, byte[] witnessProg, long amount) {
+        if (vIndex == -1) {
+            //no check
+            return true;
+        }
+        TransactionOutput vout = tx.getOutput(vIndex);
+        if (vout == null) {
+            logger.error("getTxConfirmationFromBlock: bad vout index");
+            return false;
+        }
+        logger.debug("vout: " + vout.toString());
+        if (vout.getValue().value != amount) {
+            logger.error("getTxConfirmationFromBlock: bad amount");
+            return false;
+        }
+        logger.debug("voutScript: " + Hex.toHexString(vout.getScriptBytes()));
+        if (vout.getScriptBytes().length != 34) {
+            logger.error("getTxConfirmationFromBlock: bad vout script length");
+            return false;
+        }
+        if (!Arrays.equals(vout.getScriptBytes(), witnessProg)) {
+            logger.error("getTxConfirmationFromBlock: bad vout script");
+            return false;
+        }
+        return true;
+    }
+
+
+    private int getTxConfirmationChannel(PtarmiganChannel channel, Block block, int bindex, int blockHeight, int conf) {
+        channel.setMinedBlockHash(block.getHash(), blockHeight - conf, bindex);
+        channel.setConfirmation(conf + 1);
+        mapChannel.put(Hex.toHexString(channel.peerNodeId()), channel);
+        logger.debug("getTxConfirmationFromBlock update: conf=" + channel.getConfirmation());
+        return channel.getConfirmation();
+    }
 
     /////////////////////////////////////////////////////////////////////////
 
@@ -742,12 +761,12 @@ public class Ptarmigan {
      */
     public ShortChannelParam getShortChannelParam(byte[] peerId) {
         logger.debug("getShortChannelParam() peerId=" + Hex.toHexString(peerId));
-        PtarmiganChannel ch = mapChannel.get(Hex.toHexString(peerId));
+        PtarmiganChannel channel = mapChannel.get(Hex.toHexString(peerId));
         ShortChannelParam param;
-        if (ch != null) {
-            param = ch.getShortChannelId();
+        if (channel != null) {
+            param = channel.getShortChannelId();
             if (param != null) {
-                param.minedHash = ch.getMinedBlockHash().getReversedBytes();
+                param.minedHash = channel.getMinedBlockHash().getReversedBytes();
                 logger.debug("  short_channel_param=" + param.toString());
             } else {
                 logger.debug("  short_channel_param=null");
@@ -806,8 +825,8 @@ public class Ptarmigan {
      * @throws PtarmException   fail
      */
     public SearchOutPointResult searchOutPoint(int depth, byte[] txhash, int vIndex) throws PtarmException {
-        Sha256Hash txHash = Sha256Hash.wrapReversed(txhash);
-        logger.debug("searchOutPoint(): txid=" + txHash.toString() + ", depth=" + depth);
+        TransactionOutPoint outPoint = new TransactionOutPoint(params, vIndex, Sha256Hash.wrapReversed(txhash));
+        logger.debug("searchOutPoint(): outPoint=" + outPoint.toString() + ", depth=" + depth);
         SearchOutPointResult result = new SearchOutPointResult();
         Sha256Hash blockHash = wak.wallet().getLastBlockSeenHash();
         if (blockHash == null) {
@@ -824,8 +843,7 @@ public class Ptarmigan {
             }
             logger.debug("searchOutPoint(" + blockcount + "):   blk=" + blk.getHashAsString());
             for (Transaction tx : blk.getTransactions()) {
-                TransactionOutPoint outPoint = tx.getInput(0).getOutpoint();
-                if (outPoint.getHash().equals(txHash) && outPoint.getIndex() == vIndex) {
+                if (outPoint.equals(tx.getInput(0).getOutpoint())) {
                     result.tx = tx.bitcoinSerialize();
                     result.height = blockcount;
                     logger.debug("searchOutPoint(): result=" + tx.getTxId() + ", height=" + result.height);
@@ -1045,15 +1063,15 @@ public class Ptarmigan {
 
     /** check whether unspent or not
      *
-     * @param peerId    peer node_id
+     * @param peerId    peer node_id(for limit block height)
      * @param txhash    outpoint txid
      * @param vIndex    outpoint index
      * @return  CHECKUNSPENT_xxx
      */
     public int checkUnspent(byte[] peerId, byte[] txhash, int vIndex) {
         int retval;
-        Sha256Hash txHash = Sha256Hash.wrapReversed(txhash);
-        logger.debug("checkUnspent(): txid=" + txHash.toString() + " : " + vIndex);
+        TransactionOutPoint outPoint = new TransactionOutPoint(params, vIndex, Sha256Hash.wrapReversed(txhash));
+        logger.debug("checkUnspent(): outPoint=" + outPoint.toString());
 
         if (peerId != null) {
             logger.debug("    peerId=" + Hex.toHexString(peerId));
@@ -1061,9 +1079,8 @@ public class Ptarmigan {
                 logger.debug("    unknown peer");
                 return CHECKUNSPENT_FAIL;
             }
-            //
             PtarmiganChannel channel = mapChannel.get(Hex.toHexString(peerId));
-            retval = checkUnspentChannel(channel, txHash, vIndex);
+            retval = checkUnspentChannel(channel, outPoint);
             if (retval != CHECKUNSPENT_FAIL) {
                 logger.debug("  result1=" + retval);
                 return retval;
@@ -1075,35 +1092,33 @@ public class Ptarmigan {
             if (ch == null) {
                 continue;
             }
-            retval = checkUnspentChannel(ch, txHash, vIndex);
+            retval = checkUnspentChannel(ch, outPoint);
             if (retval != CHECKUNSPENT_FAIL) {
                 logger.debug("  result2=" + retval);
                 return retval;
             }
         }
 
-        retval = checkUnspentFromBlock(null, txHash, vIndex);
+        // search until wallet creation time
+        retval = checkUnspentFromBlock(null, outPoint);
         return retval;
     }
 
 
     /** check unspent from cached channel
      *
-     * @param ch        channel
-     * @param txHash    outpoint txid
-     * @param vIndex    outpoint index
+     * @param channel   channel
+     * @param outPoint  outpoint
      * @return  CHECKUNSPENT_xxx
      */
-    private int checkUnspentChannel(PtarmiganChannel ch, Sha256Hash txHash, int vIndex) {
-        //TransactionOutPoint chkOutpoint = new TransactionOutPoint(params, vIndex, txHash);
-        TransactionOutPoint fundingOutpoint = new TransactionOutPoint(params, vIndex, txHash);
-        if ((ch.getFundingOutpoint() != null) && ch.getFundingOutpoint().equals(fundingOutpoint)) {
+    private int checkUnspentChannel(PtarmiganChannel channel, TransactionOutPoint outPoint) {
+        if ((channel.getFundingOutpoint() != null) && channel.getFundingOutpoint().equals(outPoint)) {
             // funding_tx
-            logger.debug("    funding unspent=" + ch.getFundingTxUnspent());
-            return ch.getFundingTxUnspent() ? CHECKUNSPENT_UNSPENT : CHECKUNSPENT_SPENT;
+            logger.debug("    funding unspent=" + channel.getFundingTxUnspent());
+            return channel.getFundingTxUnspent() ? CHECKUNSPENT_UNSPENT : CHECKUNSPENT_SPENT;
         } else {
             // commit_tx
-            PtarmiganChannel.CommitTxid commit_tx = ch.getCommitTxid(vIndex);
+            PtarmiganChannel.CommitTxid commit_tx = channel.getCommitTxid((int)outPoint.getIndex());
             if ((commit_tx != null) && (commit_tx.txid != null)) {
                 logger.debug("    commit_tx unspent=" + commit_tx.unspent);
                 return commit_tx.unspent ? CHECKUNSPENT_UNSPENT : CHECKUNSPENT_SPENT;
@@ -1116,19 +1131,17 @@ public class Ptarmigan {
     /** 指定したtxのunspentチェック
      *      blockCacheの各blockからvinをチェックする
      *
-     * @param ch        channel
-     * @param txHash    outpoint txid
-     * @param vIndex    outpoint index
+     * @param channel   channel(for limit block height)
+     * @param outPoint  outpoint
      * @return  CHECKUNSPENT_xxx
      */
-    private int checkUnspentFromBlock(PtarmiganChannel ch, Sha256Hash txHash, int vIndex) {
-        logger.debug("checkUnspentFromBlock(): txid=" + txHash.toString() + " : " + vIndex);
+    private int checkUnspentFromBlock(PtarmiganChannel channel, TransactionOutPoint outPoint) {
+        logger.debug("checkUnspentFromBlock(): outPoint=" + outPoint.toString());
 
         Sha256Hash blockHash = wak.wallet().getLastBlockSeenHash();
         if (blockHash == null) {
             return CHECKUNSPENT_FAIL;
         }
-        PtarmiganChannel channel = getChannelFromFundingTx(txHash);
         try {
             while (true) {
                 Block block = getBlock(blockHash);
@@ -1150,11 +1163,13 @@ public class Ptarmigan {
                                 continue;
                             }
                             logger.debug("   input:" + pnt.toString());
-                            if (pnt.getHash().equals(txHash) && pnt.getIndex() == vIndex) {
-                                logger.debug("      ----> detect!");
-                                if (ch != null) {
-                                    ch.setFundingTxSpent();
-                                    mapChannel.put(Hex.toHexString(ch.peerNodeId()), ch);
+                            if (pnt.equals(outPoint)) {
+                                if ((channel != null) && (channel.getFundingOutpoint().equals(outPoint))) {
+                                    logger.debug("checkUnspentFromBlock() ----> SPENT funding_tx!");
+                                    channel.setFundingTxSpent();
+                                    mapChannel.put(Hex.toHexString(channel.peerNodeId()), channel);
+                                } else {
+                                    logger.debug("checkUnspentFromBlock() ----> detect!");
                                 }
                                 return CHECKUNSPENT_SPENT;
                             }
@@ -1233,7 +1248,7 @@ public class Ptarmigan {
      *
      * @param peerId channel peer node_id
      * @param shortChannelId short_channel_id
-     * @param txid funding transaction TXID
+     * @param txhash funding transaction TXID
      * @param vIndex funding transaction vout
      * @param scriptPubKey witnessScript
      * @param blockHashBytes (lastConfirm=0)establish starting blockhash / (lastConfirm>0)mined blockhash
@@ -1242,13 +1257,13 @@ public class Ptarmigan {
     public boolean setChannel(
             byte[] peerId,
             long shortChannelId,
-            byte[] txid, int vIndex,
+            byte[] txhash, int vIndex,
             byte[] scriptPubKey,
             byte[] blockHashBytes,
             int lastConfirm) {
         try {
             logger.debug("setChannel() peerId=" + Hex.toHexString(peerId));
-            TransactionOutPoint fundingOutpoint = new TransactionOutPoint(params, vIndex, Sha256Hash.wrapReversed(txid));
+            TransactionOutPoint fundingOutpoint = new TransactionOutPoint(params, vIndex, Sha256Hash.wrapReversed(txhash));
             Sha256Hash blockHash = Sha256Hash.wrapReversed(blockHashBytes);
             //
             PtarmiganChannel channel = mapChannel.get(Hex.toHexString(peerId));
@@ -1315,7 +1330,7 @@ public class Ptarmigan {
             mapChannel.put(Hex.toHexString(channel.peerNodeId()), channel);
             logger.debug("setChannel: add channel: " + Hex.toHexString(peerId));
 
-            int chk_un = checkUnspentFromBlock(channel, fundingOutpoint.getHash(), vIndex);
+            int chk_un = checkUnspentFromBlock(channel, fundingOutpoint);
             logger.debug("setChannel: checkUnspent: " + chk_un);
 
             debugShowRegisteredChannel();
