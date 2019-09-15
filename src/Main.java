@@ -1,4 +1,5 @@
 import co.nayuta.lightning.Ptarmigan;
+import co.nayuta.lightning.SearchOutPointResult;
 import co.nayuta.lightning.ShortChannelParam;
 
 import java.util.ArrayList;
@@ -25,7 +26,7 @@ public class Main
             int dummyInt = 0;
             byte[] dummyBytes = null;
             ShortChannelParam dummyChan = null;
-            Ptarmigan.SearchOutPointResult dummySearch = null;
+            SearchOutPointResult dummySearch = null;
             List<byte[]> listDummy = null;
             boolean dummyBool = false;
             long dummyLong = 0;
@@ -35,7 +36,7 @@ public class Main
             dummyBytes = ptarm.getGenesisBlockHash();
             dummyInt = ptarm.getTxConfirmation(dummyBytes, -1, null, 0);
             dummyChan = ptarm.getShortChannelParam(dummyBytes);
-            dummyBytes = ptarm.getTxidFromShortChannelId(0);
+//            dummyBytes = ptarm.getTxidFromShortChannelId(0);
             dummySearch = ptarm.searchOutPoint(0, dummyBytes, 0);
             listDummy = ptarm.searchVout(0, new ArrayList<byte[]>());
             dummyBytes = ptarm.signRawTx(0, dummyBytes);
@@ -46,7 +47,7 @@ public class Main
             dummyLong = ptarm.estimateFee();
             ptarm.setChannel(dummyBytes, 0, dummyBytes, 0, dummyBytes, dummyBytes, 0);
             ptarm.delChannel(dummyBytes);
-            ptarm.setCommitTxid(dummyBytes, 0, 0, null);
+            //ptarm.setCommitTxid(dummyBytes, 0, 0, null);
             dummyLong = ptarm.getBalance();
             dummyBytes = ptarm.emptyWallet("");
         } catch (Exception e) {
