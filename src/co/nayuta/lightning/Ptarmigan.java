@@ -134,10 +134,12 @@ public class Ptarmigan {
     }
 
 
-    /**
+    /////////////////////////////////////////////////////////////////////////
+
+    /** initialize blockchain
      *
-     * @param pmtProtocolId chain name
-     * @return  SPV_START_xxx
+     * @param pmtProtocolId     chain name
+     * @return SPV_START_xxx
      */
     public int spv_start(String pmtProtocolId) {
         logger.info("spv_start: " + pmtProtocolId);
@@ -148,6 +150,32 @@ public class Ptarmigan {
             return SPV_START_ERR;
         }
 
+        int ret = spv_start_setup(pmtProtocolId);
+        if (ret != SPV_START_OK) {
+            logger.error("spv_start - reject");
+            return ret;
+        }
+
+        ret = spv_start_download();
+        if (ret == SPV_START_OK) {
+            System.out.println("\nblock downloaded");
+            saveDownloadLog(STARTUPLOG_CONT, "done.");
+            saveSeedMnemonic();
+        } else {
+            System.err.println("fail: bitcoinj start");
+            saveDownloadLog(STARTUPLOG_STOP, "*restart DL");
+        }
+        logger.info("spv_start - exit");
+        return ret;
+    }
+
+
+    /** spv_start(): 1. setup
+     *
+     * @param pmtProtocolId     chain name
+     * @return  SPV_START_xxx
+     */
+    private int spv_start_setup(String pmtProtocolId) {
         try {
             logger.debug("spv_start: start WalletAppKit");
             saveDownloadLog(STARTUPLOG_CONT, "Blocks..");
@@ -180,7 +208,15 @@ public class Ptarmigan {
             logger.error("  " + getStackTrace(e));
             return SPV_START_ERR;
         }
+        return SPV_START_OK;
+    }
 
+
+    /**
+     * spv_start(): 2. block download
+     * @return SPV_START_xxx
+     */
+    private int spv_start_download() {
         int ret;
         int retry = TIMEOUT_RETRY;
         int blockHeight = 0;
@@ -234,19 +270,281 @@ public class Ptarmigan {
                 break;
             }
         }
-
-        logger.info("spv_start - exit");
-        if (ret == SPV_START_OK) {
-            System.out.println("\nblock downloaded(" + blockHeight + ")");
-            saveDownloadLog(STARTUPLOG_CONT, "done.");
-            saveSeedMnemonic(wak.wallet());
-        } else {
-            System.err.println("fail: bitcoinj start");
-            saveDownloadLog(STARTUPLOG_STOP, "*restart DL");
-        }
         return ret;
     }
 
+
+    /** set bitcoinj callback functions
+     *
+     */
+    private void setCallbackFunctions() {
+        logger.info("set callbacks");
+        wak.peerGroup().addBlocksDownloadedEventListener((peer, block, filteredBlock, blocksLeft) -> {
+            logger.debug("  [CB]BlocksDownloaded: " + block.getHash().toString() + "-> left:" + blocksLeft);
+            blockDownloadEvent(block.getHash());
+        });
+        //
+        wak.peerGroup().addPreMessageReceivedEventListener(Threading.SAME_THREAD, (peer, m) -> {
+            //logger.debug("  [CB]PreMessageReceived: -> " + m);
+            if (m instanceof InventoryMessage) {
+                InventoryMessage im = (InventoryMessage)m;
+                logger.debug("  [CB]PreMessageReceived: -> inventory message: " + im);
+                for (InventoryItem item: im.getItems()) {
+                    logger.debug("  " + item.type + ": " + item.hash);
+                }
+            }
+            if (m instanceof RejectMessage) {
+                RejectMessage rm = (RejectMessage)m;
+                logger.debug("  [CB]PreMessageReceived: -> reject message: " + rm.getReasonString());
+                messageRejectEvent(rm);
+            }
+            return m;
+        });
+        //commit_txの捕捉に使用できる
+        wak.peerGroup().addOnTransactionBroadcastListener((peer, tx) -> {
+            logger.debug("  [CB]TransactionBroadcast: -> " + tx.getTxId().toString());
+            logger.debug("    tx: " + tx);
+            sendEvent(tx);
+        });
+        //
+        wak.wallet().addCoinsReceivedEventListener((wallet, tx, coin0, coin1) -> {
+            logger.debug("  [CB]CoinsReceived: -> " + tx.getTxId().toString());
+            logger.debug("    tx: " + tx);
+            logger.debug("    coin0: " + coin0);
+            logger.debug("    coin1: " + coin1);
+            TransactionOutPoint opnt = tx.getInput(0).getOutpoint();
+            logger.debug("      outpoint: " + opnt.getHash().toString() + ":" + opnt.getIndex());
+            recvEvent(tx);
+        });
+        wak.wallet().addCoinsSentEventListener((wallet, tx, coin0, coin1) -> {
+            logger.debug("  [CB]CoinsSent: -> " + tx.getTxId().toString());
+            logger.debug("    tx: " + tx);
+            logger.debug("    coin0: " + coin0);
+            logger.debug("    coin1: " + coin1);
+            TransactionOutPoint opnt = tx.getInput(0).getOutpoint();
+            logger.debug("      outpoint: " + opnt.getHash().toString() + ":" + opnt.getIndex());
+            sendEvent(tx);
+        });
+        wak.wallet().addReorganizeEventListener(wallet -> {
+            logger.debug("  [CB]Reorganize: ->");
+        });
+        wak.wallet().addScriptsChangeEventListener((wallet, scripts, isAdding) -> {
+            logger.debug("  [CB]ScriptsChange: -> ");
+            logger.debug("    scripts: " + scripts);
+        });
+        wak.wallet().addKeyChainEventListener(keys -> {
+            logger.debug("  [CB]KeyChain: -> ");
+        });
+        wak.wallet().addTransactionConfidenceEventListener((wallet, tx) -> {
+            logger.debug("  [CB]TransactionConfidence: -> " + tx.getTxId());
+        });
+        wak.wallet().addChangeEventListener(wallet -> {
+            logger.debug("  [CB]WalletChange: -> " + wallet.getBalance().toFriendlyString());
+        });
+        logger.info("set callbacks: end");
+    }
+
+
+    /** [event]着金時処理
+     *
+     * @param txRecv    transaction
+     */
+    private void recvEvent(Transaction txRecv) {
+        findRegisteredTx(txRecv);
+    }
+
+
+    /** [event]送金時処理
+     *
+     * @param txSend    transaction
+     */
+    private void sendEvent(Transaction txSend) {
+        findRegisteredTx(txSend);
+    }
+
+
+    /**
+     *
+     * @param targetTx  transaction
+     */
+    private void findRegisteredTx(Transaction targetTx) {
+        TransactionOutPoint targetOutpointTxid = targetTx.getInput(0).getOutpoint();
+        logger.debug("findRegisteredTx(): txid=" + targetOutpointTxid.getHash().toString());
+        for (PtarmiganChannel ch : mapChannel.values()) {
+            TransactionOutPoint fundingOutpoint = ch.getFundingOutpoint();
+            if (fundingOutpoint == null) {
+                continue;
+            }
+            logger.debug("   ch txid=" + fundingOutpoint.toString());
+            if (targetOutpointTxid.equals(fundingOutpoint)) {
+                logger.debug("  funding spent!");
+                ch.setFundingTxSpent();
+            } else {
+                //おそらくこの部分は稼働していない(commit_txidを設定しないので)
+                int idx = checkCommitTxids(ch, targetTx.getTxId());
+                if (idx != COMMITTXID_MAX) {
+                    switch (idx) {
+                    case COMMITTXID_LOCAL:
+                        logger.debug("unilateral close: local");
+                        break;
+                    case COMMITTXID_REMOTE:
+                        logger.debug("unilateral close: remote");
+                        break;
+                    }
+                    ch.getCommitTxid(idx).unspent = false;
+                    mapChannel.put(Hex.toHexString(ch.peerNodeId()), ch);
+                }
+            }
+        }
+    }
+
+
+    /**
+     *  このタイミングでは引数のblockHashとWallet#getLastBlockSeenHash()は必ずしも一致しない。
+     *  すなわち、Wallet#getLastBlockSeenHeight()とも一致しないということである。
+     * @param blockHash block hash
+     */
+    private void blockDownloadEvent(Sha256Hash blockHash) {
+        logger.debug("===== blockDownloadEvent(block=" + blockHash.toString() + ")");
+//
+//        for (PtarmiganChannel ch : mapChannel.values()) {
+//            TransactionOutPoint fundingOutpoint = ch.getFundingOutpoint();
+//            if (fundingOutpoint == null) {
+//                logger.debug("  no channel");
+//                continue;
+//            }
+//            if (ch.getConfirmation() <= 0) {
+//                //mining check
+//                logger.debug("  blockDownloadEvent: mining check");
+//
+//                Block block = getBlock(blockHash);
+//                if (block == null || !block.hasTransactions()) {
+//                    logger.debug("   no block");
+//                    break;
+//                }
+//                int bindex = 0;
+//                List<Transaction> txs = block.getTransactions();
+//                if (txs == null) {
+//                    logger.debug("   no transaction");
+//                    break;
+//                }
+//                for (Transaction tx: txs) {
+//                    if (tx != null) {
+//                        logger.debug("   blockDownloadEvent: tx=" + tx.getTxId().toString());
+//                        if (tx.getTxId().equals(fundingOutpoint.getHash())) {
+//                            if (tx.getConfidence() != null) {
+//                                int blockHeight = tx.getConfidence().getAppearedAtChainHeight();
+//                                logger.debug("   blockDownloadEvent: height=" + blockHeight);
+//                                ch.setMinedBlockHash(blockHash, blockHeight, bindex);
+//                                ch.setConfirmation(1);
+//                                logger.debug("BLOCK funding_tx:" + tx.toString());
+//                            } else {
+//                                logger.debug("  blockDownloadEvent: no confidence");
+//                            }
+//                            break;
+//                        }
+//                    }
+//                    bindex++;
+//                }
+//            }
+//
+//            mapChannel.put(Hex.toHexString(ch.peerNodeId()), ch);
+//            logger.debug(" --> " + ch.getConfirmation());
+//        }
+    }
+
+
+    /**
+     *
+     * @param message   reject message
+     */
+    private void messageRejectEvent(RejectMessage message) {
+        logger.debug("messageRejectEvent");
+        logger.debug("  " + message.getRejectedObjectHash());
+        logger.debug("  " + message.getReasonString());
+
+        if (mapSendTx.containsKey(message.getRejectedObjectHash())) {
+            logger.debug("messageRejectEvent: NG: send tx");
+            SendRawTxResult retSendTx = mapSendTx.get(message.getRejectedObjectHash());
+            retSendTx.result = SendRawTxResult.Result.REJECT;
+            mapSendTx.put(message.getRejectedObjectHash(), retSendTx);
+            retSendTx.unlock();
+        }
+    }
+
+
+    /** save block download logfile
+     *
+     * @param logPrefix     log filename prefix
+     * @param str   log string
+     */
+    private void saveDownloadLog(int logPrefix, String str) {
+        try {
+            FileWriter fileWriter = new FileWriter("./logs/" + FILE_STARTUP, false);
+            String prefix;
+            switch (logPrefix) {
+                case STARTUPLOG_CONT:
+                    prefix = "CONT=";
+                    break;
+                case STARTUPLOG_STOP:
+                    prefix = "STOP=";
+                    break;
+                case STARTUPLOG_BLOCK:
+                    prefix = "BLOCK=";
+                    break;
+                default:
+                    prefix = "";
+            }
+            fileWriter.write(prefix + str);
+            fileWriter.close();
+        } catch (IOException e) {
+            logger.error("FileWriter:" + str);
+        }
+    }
+
+
+    /**  save mnemonic
+     */
+    private void saveSeedMnemonic() {
+        DeterministicSeed seed = wak.wallet().getKeyChainSeed();
+        if ((seed == null) || (seed.getMnemonicCode() == null)) {
+            logger.error("mnemonic null");
+            return;
+        }
+        String mnemonic = Utils.SPACE_JOINER.join(seed.getMnemonicCode());
+        try {
+            FileWriter fileWriter = new FileWriter("./" + FILE_MNEMONIC, false);
+            fileWriter.write(mnemonic);
+            fileWriter.close();
+        } catch (IOException e) {
+            logger.error("FileWriter: "+ getStackTrace(e));
+        }
+    }
+
+
+    /** remove saved chain file
+     *
+     */
+    private void removeChainFile() {
+        wak.stopAsync();
+        String chainFilename = wak.directory().getAbsolutePath() +
+                FileSystems.getDefault().getSeparator() + WALLET_PREFIX + ".spvchain";
+        Path chainPathOriginal = Paths.get(chainFilename);
+        Path chainPathBackup = Paths.get(chainFilename + ".bak");
+        try {
+            Files.delete(chainPathBackup);
+        } catch (IOException eFile) {
+            //
+        }
+        try {
+            Files.move(chainPathOriginal, chainPathBackup);
+        } catch (IOException eFile) {
+            logger.error("spv_start rename chain: " + getStackTrace(eFile));
+        }
+    }
+
+
+    /////////////////////////////////////////////////////////////////////////
 
     /** set block hash to stop searching
      *
@@ -257,6 +555,8 @@ public class Ptarmigan {
         logger.debug("setCreationHash()=" + creationHash.toString());
     }
 
+
+    /////////////////////////////////////////////////////////////////////////
 
     /** get block height
      *
@@ -287,6 +587,8 @@ public class Ptarmigan {
     }
 
 
+    /////////////////////////////////////////////////////////////////////////
+
     /** get genesis block hash
      *
      * @return  genesis block hash
@@ -297,6 +599,8 @@ public class Ptarmigan {
         return hash.getReversedBytes();
     }
 
+
+    /////////////////////////////////////////////////////////////////////////
 
     /** get confirmation
      *
@@ -429,6 +733,8 @@ public class Ptarmigan {
     }
 
 
+    /////////////////////////////////////////////////////////////////////////
+
     /** get short_channel_id parameter
      *
      * @param peerId    peer node_id
@@ -454,6 +760,8 @@ public class Ptarmigan {
     }
 
 
+//    /////////////////////////////////////////////////////////////////////////
+//
 //    /** short_channel_idが指すtxid取得(bitcoinj試作：呼ばれない予定)
 //     *
 //     * @param id    short_channel_id
@@ -484,6 +792,8 @@ public class Ptarmigan {
 //        return null;
 //    }
 
+
+    /////////////////////////////////////////////////////////////////////////
 
     /** search transaction from outpoint
      *
@@ -532,6 +842,8 @@ public class Ptarmigan {
     }
 
 
+    /////////////////////////////////////////////////////////////////////////
+
     /** search transaction from vout
      *
      * @param depth     search block count
@@ -565,6 +877,8 @@ public class Ptarmigan {
     }
 
 
+    /////////////////////////////////////////////////////////////////////////
+
     /** create signed transaction
      *
      * @param amount    amount
@@ -590,6 +904,8 @@ public class Ptarmigan {
         return null;
     }
 
+
+    /////////////////////////////////////////////////////////////////////////
 
     /** send raw transaction
      *
@@ -648,6 +964,8 @@ public class Ptarmigan {
         return null;
     }
 
+
+    /////////////////////////////////////////////////////////////////////////
 
     /** txの展開済みチェック
      *
@@ -711,17 +1029,19 @@ public class Ptarmigan {
             }
 
         } catch (PtarmException e) {
-            logger.error("rethrow: " + getStackTrace(e));
+            logger.error("checkBroadcast rethrow: " + getStackTrace(e));
             //throw e;
         } catch (Exception e) {
-            logger.error("getTxConfirmationFromBlock: " + getStackTrace(e));
+            logger.error("checkBroadcast: " + getStackTrace(e));
         }
 
         Transaction tx = getTransaction(txHash, channel.getMinedBlockHash());
-        logger.debug("  broadcast(get txs)=" + ((tx != null) ? "YES" : "NO"));
+        logger.debug("checkBroadcast:  broadcast(get txs)=" + ((tx != null) ? "YES" : "NO"));
         return tx != null;
     }
 
+
+    /////////////////////////////////////////////////////////////////////////
 
     /** check whether unspent or not
      *
@@ -854,11 +1174,11 @@ public class Ptarmigan {
                 // ひとつ前のブロック
                 blockHash = block.getPrevBlockHash();
             }
-        } catch (PtarmException e) {
-            logger.error("rethrow: " + getStackTrace(e));
-            //throw e;
         } catch (Exception e) {
-            logger.error("getTxConfirmationFromBlock: " + getStackTrace(e));
+            //logger.error("checkUnspentFromBlock(): rethrow: " + getStackTrace(e));
+            //throw e;
+            logger.error("checkUnspentFromBlock(): exception: " + getStackTrace(e));
+            return CHECKUNSPENT_FAIL;
         }
 
         logger.debug("checkUnspentFromBlock(): vin not found");
@@ -866,7 +1186,9 @@ public class Ptarmigan {
     }
 
 
-    /** 受信アドレス取得(scriptPubKey)
+    /////////////////////////////////////////////////////////////////////////
+
+    /** get receive address(scriptPubKey)
      *
      * @return  address
      */
@@ -880,6 +1202,8 @@ public class Ptarmigan {
         }
     }
 
+
+    /////////////////////////////////////////////////////////////////////////
 
     /** feerate per 1000byte
      *
@@ -903,7 +1227,9 @@ public class Ptarmigan {
     }
 
 
-    /** チャネル情報追加
+    /////////////////////////////////////////////////////////////////////////
+
+    /** add channel information
      *
      * @param peerId channel peer node_id
      * @param shortChannelId short_channel_id
@@ -925,14 +1251,19 @@ public class Ptarmigan {
             TransactionOutPoint fundingOutpoint = new TransactionOutPoint(params, vIndex, Sha256Hash.wrapReversed(txid));
             Sha256Hash blockHash = Sha256Hash.wrapReversed(blockHashBytes);
             //
-            //if (!blockHash.equals(Sha256Hash.ZERO_HASH)) {
-            //    if (!blockCache.containsKey(blockHash)) {
-            //        //cache
-            //        getBlockDeep(blockHash);
-            //    }
-            //}
+            PtarmiganChannel channel = mapChannel.get(Hex.toHexString(peerId));
+            int prevConfirm;
+            if (channel == null) {
+                logger.debug("    ADD NEW CHANNEL!!");
+                channel = new PtarmiganChannel(peerId, new ShortChannelParam());
+                prevConfirm = 0;
+            } else {
+                logger.debug("    change channel settings: " + channel.getShortChannelId().toString());
+                prevConfirm = channel.getConfirmation();
+            }
+            //
             int minedHeight = 0;
-            if (lastConfirm > 0) {
+            if (prevConfirm > 0) {
                 try {
                     BlockStore bs = wak.chain().getBlockStore();
                     StoredBlock sb = bs.get(blockHash);
@@ -945,40 +1276,26 @@ public class Ptarmigan {
                     logger.error("setChannel 1: " + getStackTrace(e));
                 }
             }
+            if ( (minedHeight == 0) &&
+                    (channel.getShortChannelId() != null) &&
+                    (channel.getShortChannelId().height > 0) ) {
+                logger.debug("setChannel: update minedHeight from short_channel_id");
+                minedHeight = channel.getShortChannelId().height;
+            }
             int blockHeight = wak.wallet().getLastBlockSeenHeight();
 
             logger.debug("  shortChannelId=" + shortChannelId);
             logger.debug("  fundingOutpoint=" + fundingOutpoint.toString());
             logger.debug("  scriptPubKey=" + Hex.toHexString(scriptPubKey));
+            logger.debug("  prevConfirm=" + prevConfirm);
             logger.debug("  lastConfirm=" + lastConfirm);
-            if (lastConfirm > 0) {
-                logger.debug("  minedBlockHash=" + blockHash.toString());
-            } else {
-                logger.debug("  establishingBlockHash=" + blockHash.toString());
-            }
+            logger.debug("  minedBlockHash=" + blockHash.toString());
             logger.debug("  minedHeight=" + minedHeight);
             logger.debug("  blockCount =" + blockHeight);
 
-            byte[] txRaw = null;
-            if (minedHeight > 0) {
-                //lastConfirmは現在のconfirmationと一致している場合がある。
-                //余裕を持たせて+3する。
-                SearchOutPointResult resultSearch = searchOutPoint(
-                            blockHeight - minedHeight + 1 - lastConfirm + 3,
-                            fundingOutpoint.getHash().getReversedBytes(), (int)fundingOutpoint.getIndex());
-                txRaw = resultSearch.tx;
-            }
-            logger.debug("      " + ((txRaw != null) ? "SPENT" : "UNSPENT"));
-
-            PtarmiganChannel channel = mapChannel.get(Hex.toHexString(peerId));
-            if (channel == null) {
-                logger.debug("    ADD NEW CHANNEL!!");
-                channel = new PtarmiganChannel(peerId, new ShortChannelParam());
-            } else {
-                logger.debug("    change channel settings");
-            }
             //shortChannelIdが0以外ならheight, bIndex, vIndexが更新される
-            channel.initialize(shortChannelId, fundingOutpoint, (txRaw == null));
+            //channel.initialize(shortChannelId, fundingOutpoint, (txRaw == null));
+            channel.initialize(shortChannelId, fundingOutpoint, true);  //とりあえずUNSPENTでやっておく
             channel.setMinedBlockHash(blockHash, minedHeight, -1);
             if (minedHeight > 0) {
                 logger.debug("setChannel: minedConfirm");
@@ -998,17 +1315,19 @@ public class Ptarmigan {
             mapChannel.put(Hex.toHexString(channel.peerNodeId()), channel);
             logger.debug("setChannel: add channel: " + Hex.toHexString(peerId));
 
-            if (!channel.getFundingTxUnspent()) {
-                checkUnspentFromBlock(channel, fundingOutpoint.getHash(), vIndex);
-            }
+            int chk_un = checkUnspentFromBlock(channel, fundingOutpoint.getHash(), vIndex);
+            logger.debug("setChannel: checkUnspent: " + chk_un);
 
             debugShowRegisteredChannel();
         } catch (Exception e) {
             logger.error("setChannel: " + getStackTrace(e));
         }
         logger.debug("setChannel: exit");
+        return true;
     }
 
+
+    /////////////////////////////////////////////////////////////////////////
 
     /** チャネル情報削除
      *
@@ -1024,6 +1343,8 @@ public class Ptarmigan {
         }
     }
 
+
+    /////////////////////////////////////////////////////////////////////////
 
 //    /** 監視tx登録
 //     *
@@ -1041,7 +1362,9 @@ public class Ptarmigan {
 //    }
 
 
-    /** balance取得
+    /////////////////////////////////////////////////////////////////////////
+
+    /** get balance
      *
      * @return  balance(satoshis)
      */
@@ -1053,6 +1376,8 @@ public class Ptarmigan {
         return wak.wallet().getBalance(Wallet.BalanceType.AVAILABLE_SPENDABLE).getValue();
     }
 
+
+    /////////////////////////////////////////////////////////////////////////
 
     /** walletを空にするtxを作成して送信
      *
@@ -1093,129 +1418,6 @@ public class Ptarmigan {
     // Private
     //-------------------------------------------------------------------------
 
-    /** set bitcoinj callback functions
-     *
-     */
-    private void setCallbackFunctions() {
-        logger.info("set callbacks");
-        wak.peerGroup().addBlocksDownloadedEventListener((peer, block, filteredBlock, blocksLeft) -> {
-            logger.debug("  [CB]BlocksDownloaded: " + block.getHash().toString() + "-> left:" + blocksLeft);
-            blockDownloadEvent(block.getHash());
-        });
-        //
-        wak.peerGroup().addPreMessageReceivedEventListener(Threading.SAME_THREAD, (peer, m) -> {
-            //logger.debug("  [CB]PreMessageReceived: -> " + m);
-            if (m instanceof InventoryMessage) {
-                InventoryMessage im = (InventoryMessage)m;
-                logger.debug("  [CB]PreMessageReceived: -> inventory message: " + im);
-                for (InventoryItem item: im.getItems()) {
-                    logger.debug("  " + item.type + ": " + item.hash);
-                }
-            }
-            if (m instanceof RejectMessage) {
-                RejectMessage rm = (RejectMessage)m;
-                logger.debug("  [CB]PreMessageReceived: -> reject message: " + rm.getReasonString());
-                messageRejectEvent(rm);
-            }
-            return m;
-        });
-        //commit_txの捕捉に使用できる
-        wak.peerGroup().addOnTransactionBroadcastListener((peer, tx) -> {
-            logger.debug("  [CB]TransactionBroadcast: -> " + tx.getTxId().toString());
-            logger.debug("    tx: " + tx);
-            sendEvent(tx);
-        });
-        //
-        wak.wallet().addCoinsReceivedEventListener((wallet, tx, coin0, coin1) -> {
-            logger.debug("  [CB]CoinsReceived: -> " + tx.getTxId().toString());
-            logger.debug("    tx: " + tx);
-            logger.debug("    coin0: " + coin0);
-            logger.debug("    coin1: " + coin1);
-            TransactionOutPoint opnt = tx.getInput(0).getOutpoint();
-            logger.debug("      outpoint: " + opnt.getHash().toString() + ":" + opnt.getIndex());
-            recvEvent(tx);
-        });
-        wak.wallet().addCoinsSentEventListener((wallet, tx, coin0, coin1) -> {
-            logger.debug("  [CB]CoinsSent: -> " + tx.getTxId().toString());
-            logger.debug("    tx: " + tx);
-            logger.debug("    coin0: " + coin0);
-            logger.debug("    coin1: " + coin1);
-            TransactionOutPoint opnt = tx.getInput(0).getOutpoint();
-            logger.debug("      outpoint: " + opnt.getHash().toString() + ":" + opnt.getIndex());
-            sendEvent(tx);
-        });
-        wak.wallet().addReorganizeEventListener(wallet -> {
-            logger.debug("  [CB]Reorganize: ->");
-        });
-        wak.wallet().addScriptsChangeEventListener((wallet, scripts, isAdding) -> {
-            logger.debug("  [CB]ScriptsChange: -> ");
-            logger.debug("    scripts: " + scripts);
-        });
-        wak.wallet().addKeyChainEventListener(keys -> {
-            logger.debug("  [CB]KeyChain: -> ");
-        });
-        wak.wallet().addTransactionConfidenceEventListener((wallet, tx) -> {
-            logger.debug("  [CB]TransactionConfidence: -> " + tx.getTxId());
-        });
-        wak.wallet().addChangeEventListener(wallet -> {
-            logger.debug("  [CB]WalletChange: -> " + wallet.getBalance().toFriendlyString());
-        });
-        logger.info("set callbacks: end");
-    }
-
-
-    /** save block download logfile
-     *
-     * @param logPrefix     log filename prefix
-     * @param str   log string
-     */
-    private void saveDownloadLog(int logPrefix, String str) {
-        try {
-            FileWriter fileWriter = new FileWriter("./logs/" + FILE_STARTUP, false);
-            String prefix;
-            switch (logPrefix) {
-                case STARTUPLOG_CONT:
-                    prefix = "CONT=";
-                    break;
-                case STARTUPLOG_STOP:
-                    prefix = "STOP=";
-                    break;
-                case STARTUPLOG_BLOCK:
-                    prefix = "BLOCK=";
-                    break;
-                default:
-                    prefix = "";
-            }
-            fileWriter.write(prefix + str);
-            fileWriter.close();
-        } catch (IOException e) {
-            logger.error("FileWriter:" + str);
-        }
-    }
-
-
-    /** get funding_tx from channels
-     *
-     * @param txHash    txid
-     * @return  channel
-     */
-    private PtarmiganChannel getChannelFromFundingTx(Sha256Hash txHash) {
-        PtarmiganChannel matchChannel = null;
-        try {
-            for (PtarmiganChannel ch : mapChannel.values()) {
-                if ((ch.getFundingOutpoint() != null) &&
-                        ch.getFundingOutpoint().getHash().equals(txHash)) {
-                    matchChannel = ch;
-                    break;
-                }
-            }
-        } catch (Exception e) {
-            logger.error("getChannel(): " + getStackTrace(e));
-        }
-        return matchChannel;
-    }
-
-
     /** get Peer
      *
      * @return  peer
@@ -1235,6 +1437,8 @@ public class Ptarmigan {
         return peer;
     }
 
+
+    /////////////////////////////////////////////////////////////////////////
 
     /** get Block from cache or peer
      *
@@ -1286,6 +1490,8 @@ public class Ptarmigan {
         return block;
     }
 
+
+    /////////////////////////////////////////////////////////////////////////
 
     /** get transaction from cache or peer
      *
@@ -1359,133 +1565,31 @@ public class Ptarmigan {
     }
 
 
-    /** [event]着金時処理
+    /////////////////////////////////////////////////////////////////////////
+
+    /** get funding_tx from channels
      *
-     * @param txRecv    transaction
+     * @param txHash    txid
+     * @return  channel
      */
-    private void recvEvent(Transaction txRecv) {
-        findRegisteredTx(txRecv);
-    }
-
-
-    /** [event]送金時処理
-     *
-     * @param txSend    transaction
-     */
-    private void sendEvent(Transaction txSend) {
-        findRegisteredTx(txSend);
-    }
-
-
-    /**
-     *
-     * @param targetTx  transaction
-     */
-    private void findRegisteredTx(Transaction targetTx) {
-        TransactionOutPoint targetOutpointTxid = targetTx.getInput(0).getOutpoint();
-        logger.debug("findRegisteredTx(): txid=" + targetOutpointTxid.getHash().toString());
-        for (PtarmiganChannel ch : mapChannel.values()) {
-            TransactionOutPoint fundingOutpoint = ch.getFundingOutpoint();
-            if (fundingOutpoint == null) {
-                continue;
-            }
-            logger.debug("   ch txid=" + fundingOutpoint.toString());
-            if (targetOutpointTxid.equals(fundingOutpoint)) {
-                logger.debug("  funding spent!");
-                ch.setFundingTxSpent();
-            } else {
-                //おそらくこの部分は稼働していない(commit_txidを設定しないので)
-                int idx = checkCommitTxids(ch, targetTx.getTxId());
-                if (idx != COMMITTXID_MAX) {
-                    switch (idx) {
-                    case COMMITTXID_LOCAL:
-                        logger.debug("unilateral close: local");
-                        break;
-                    case COMMITTXID_REMOTE:
-                        logger.debug("unilateral close: remote");
-                        break;
-                    }
-                    ch.getCommitTxid(idx).unspent = false;
-                    mapChannel.put(Hex.toHexString(ch.peerNodeId()), ch);
+    private PtarmiganChannel getChannelFromFundingTx(Sha256Hash txHash) {
+        PtarmiganChannel matchChannel = null;
+        try {
+            for (PtarmiganChannel ch : mapChannel.values()) {
+                if ((ch.getFundingOutpoint() != null) &&
+                        ch.getFundingOutpoint().getHash().equals(txHash)) {
+                    matchChannel = ch;
+                    break;
                 }
             }
+        } catch (Exception e) {
+            logger.error("getChannel(): " + getStackTrace(e));
         }
+        return matchChannel;
     }
 
 
-    /**
-     *  このタイミングでは引数のblockHashとWallet#getLastBlockSeenHash()は必ずしも一致しない。
-     *  すなわち、Wallet#getLastBlockSeenHeight()とも一致しないということである。
-     * @param blockHash block hash
-     */
-    private void blockDownloadEvent(Sha256Hash blockHash) {
-        logger.debug("===== blockDownloadEvent(block=" + blockHash.toString() + ")");
-//
-//        for (PtarmiganChannel ch : mapChannel.values()) {
-//            TransactionOutPoint fundingOutpoint = ch.getFundingOutpoint();
-//            if (fundingOutpoint == null) {
-//                logger.debug("  no channel");
-//                continue;
-//            }
-//            if (ch.getConfirmation() <= 0) {
-//                //mining check
-//                logger.debug("  blockDownloadEvent: mining check");
-//
-//                Block block = getBlock(blockHash);
-//                if (block == null || !block.hasTransactions()) {
-//                    logger.debug("   no block");
-//                    break;
-//                }
-//                int bindex = 0;
-//                List<Transaction> txs = block.getTransactions();
-//                if (txs == null) {
-//                    logger.debug("   no transaction");
-//                    break;
-//                }
-//                for (Transaction tx: txs) {
-//                    if (tx != null) {
-//                        logger.debug("   blockDownloadEvent: tx=" + tx.getTxId().toString());
-//                        if (tx.getTxId().equals(fundingOutpoint.getHash())) {
-//                            if (tx.getConfidence() != null) {
-//                                int blockHeight = tx.getConfidence().getAppearedAtChainHeight();
-//                                logger.debug("   blockDownloadEvent: height=" + blockHeight);
-//                                ch.setMinedBlockHash(blockHash, blockHeight, bindex);
-//                                ch.setConfirmation(1);
-//                                logger.debug("BLOCK funding_tx:" + tx.toString());
-//                            } else {
-//                                logger.debug("  blockDownloadEvent: no confidence");
-//                            }
-//                            break;
-//                        }
-//                    }
-//                    bindex++;
-//                }
-//            }
-//
-//            mapChannel.put(Hex.toHexString(ch.peerNodeId()), ch);
-//            logger.debug(" --> " + ch.getConfirmation());
-//        }
-    }
-
-
-    /**
-     *
-     * @param message   reject message
-     */
-    private void messageRejectEvent(RejectMessage message) {
-        logger.debug("messageRejectEvent");
-        logger.debug("  " + message.getRejectedObjectHash());
-        logger.debug("  " + message.getReasonString());
-
-        if (mapSendTx.containsKey(message.getRejectedObjectHash())) {
-            logger.debug("messageRejectEvent: NG: send tx");
-            SendRawTxResult retSendTx = mapSendTx.get(message.getRejectedObjectHash());
-            retSendTx.result = SendRawTxResult.Result.REJECT;
-            mapSendTx.put(message.getRejectedObjectHash(), retSendTx);
-            retSendTx.unlock();
-        }
-    }
-
+    /////////////////////////////////////////////////////////////////////////
 
     /** Txのspent登録チェック
      *
@@ -1503,6 +1607,8 @@ public class Ptarmigan {
     }
 
 
+    /////////////////////////////////////////////////////////////////////////
+
     /** debug
      *
      */
@@ -1514,49 +1620,6 @@ public class Ptarmigan {
             //logger.debug("       fund:" + ((fundingOutpoint != null) ? fundingOutpoint.toString() : "no-fundtx") + ":" + ch.getShortChannelId().vIndex);
         }
         logger.debug("===== debugShowRegisteredChannel: end =====");
-    }
-
-
-    /**  save mnemonic
-     *
-     * @param wallet    wallet
-     */
-    private void saveSeedMnemonic(Wallet wallet) {
-        DeterministicSeed seed = wallet.getKeyChainSeed();
-        if ((seed == null) || (seed.getMnemonicCode() == null)) {
-            logger.error("mnemonic null");
-            return;
-        }
-        String mnemonic = Utils.SPACE_JOINER.join(seed.getMnemonicCode());
-        try {
-            FileWriter fileWriter = new FileWriter("./" + FILE_MNEMONIC, false);
-            fileWriter.write(mnemonic);
-            fileWriter.close();
-        } catch (IOException e) {
-            logger.error("FileWriter: "+ getStackTrace(e));
-        }
-    }
-
-
-    /** remove saved chain file
-     *
-     */
-    private void removeChainFile() {
-        wak.stopAsync();
-        String chainFilename = wak.directory().getAbsolutePath() +
-                FileSystems.getDefault().getSeparator() + WALLET_PREFIX + ".spvchain";
-        Path chainPathOriginal = Paths.get(chainFilename);
-        Path chainPathBackup = Paths.get(chainFilename + ".bak");
-        try {
-            Files.delete(chainPathBackup);
-        } catch (IOException eFile) {
-            //
-        }
-        try {
-            Files.move(chainPathOriginal, chainPathBackup);
-        } catch (IOException eFile) {
-            logger.error("spv_start rename chain: " + getStackTrace(eFile));
-        }
     }
 
 
