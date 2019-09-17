@@ -29,37 +29,37 @@ import java.util.concurrent.TimeoutException;
 public class Ptarmigan {
     private static final String VERSION = "0.0.4.x";
     //
-    static public final int CHECKUNSPENT_FAIL = -1;
-    static public final int CHECKUNSPENT_UNSPENT = 0;
-    static public final int CHECKUNSPENT_SPENT = 1;
+    public static final int CHECKUNSPENT_FAIL = -1;
+    public static final int CHECKUNSPENT_UNSPENT = 0;
+    public static final int CHECKUNSPENT_SPENT = 1;
     //
-    static public final int COMMITTXID_LOCAL = 0;
-    static public final int COMMITTXID_REMOTE = 1;
-    static public final int COMMITTXID_MAX = 2;
+    public static final int COMMITTXID_LOCAL = 0;
+    public static final int COMMITTXID_REMOTE = 1;
+    public static final int COMMITTXID_MAX = 2;
     //
-    static public final int SPV_START_OK = 0;
-    static public final int SPV_START_FILE = 1;
-    static public final int SPV_START_BJ = 2;
-    static public final int SPV_START_ERR = 3;
+    public static final int SPV_START_OK = 0;
+    public static final int SPV_START_FILE = 1;
+    public static final int SPV_START_BJ = 2;
+    public static final int SPV_START_ERR = 3;
     //
-    static private final int TIMEOUT_RETRY = 12;
-    static private final long TIMEOUT_START = 5;            //sec
-    static private final long TIMEOUT_SENDTX = 10000;       //msec
-    static private final long TIMEOUT_REJECT = 2000;        //msec
-    static private final long TIMEOUT_GET = 30000;          //msec
+    private static final int TIMEOUT_RETRY = 12;
+    private static final long TIMEOUT_START = 5;            //sec
+    private static final long TIMEOUT_SENDTX = 10000;       //msec
+    private static final long TIMEOUT_REJECT = 2000;        //msec
+    private static final long TIMEOUT_GET = 30000;          //msec
     //
-    static private final int RETRY_SENDRAWTX = 3;
+    private static final int RETRY_SENDRAWTX = 3;
     //
-    static private final String FILE_STARTUP = "bitcoinj_startup.log";
-    static private final String FILE_MNEMONIC = "bitcoinj_mnemonic.txt";
-    static private final String WALLET_PREFIX = "ptarm_p2wpkh";
+    private static final String FILE_STARTUP = "bitcoinj_startup.log";
+    private static final String FILE_MNEMONIC = "bitcoinj_mnemonic.txt";
+    private static final String WALLET_PREFIX = "ptarm_p2wpkh";
     //
-    static private final int STARTUPLOG_CONT = 1;
-    static private final int STARTUPLOG_STOP = 2;
-    static private final int STARTUPLOG_BLOCK = 3;
+    private static final int STARTUPLOG_CONT = 1;
+    private static final int STARTUPLOG_STOP = 2;
+    private static final int STARTUPLOG_BLOCK = 3;
     //
-    static private final int DOWNLOAD_FAIL_COUNT_MAX = 10;
-    static private final int PEER_FAIL_COUNT_MAX = 6;
+    private static final int DOWNLOAD_FAIL_COUNT_MAX = 10;
+    private static final int PEER_FAIL_COUNT_MAX = 6;
     //
     private NetworkParameters params;
     private WalletAppKit wak;
