@@ -1261,8 +1261,9 @@ public class Ptarmigan {
             byte[] scriptPubKey,
             byte[] blockHashBytes,
             int lastConfirm) {
+        boolean result = false;
+        logger.debug("setChannel() peerId=" + Hex.toHexString(peerId));
         try {
-            logger.debug("setChannel() peerId=" + Hex.toHexString(peerId));
             TransactionOutPoint fundingOutpoint = new TransactionOutPoint(params, vIndex, Sha256Hash.wrapReversed(txid));
             Sha256Hash blockHash = Sha256Hash.wrapReversed(blockHashBytes);
             //
@@ -1334,11 +1335,12 @@ public class Ptarmigan {
             logger.debug("setChannel: checkUnspent: " + chk_un);
 
             debugShowRegisteredChannel();
+            result = true;
         } catch (Exception e) {
             logger.error("setChannel: " + getStackTrace(e));
         }
-        logger.debug("setChannel: exit");
-        return true;
+        logger.debug("setChannel: exit(" + result + ")");
+        return result;
     }
 
 
