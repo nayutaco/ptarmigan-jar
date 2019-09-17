@@ -6,17 +6,20 @@ import org.bouncycastle.util.encoders.Hex;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 public class PtarmiganChannel {
     //
     static class CommitTxid {
         int commitNum = 0;
         Sha256Hash txid = null;
-        Boolean unspent = true;
+        int unspent = Ptarmigan.CHECKUNSPENT_FAIL;
     }
     //
     private byte[] peerNodeId;
     private ShortChannelParam shortChannelId;
-    private boolean fundingTxUnspent = true;
+    private int fundingTxUnspent = Ptarmigan.CHECKUNSPENT_FAIL;
+    private Sha256Hash lastUnspentHash = null;
     private int confirmation = -1;
     private CommitTxid[] commitTxids = new CommitTxid[Ptarmigan.COMMITTXID_MAX];
     private TransactionOutPoint fundingOutpoint;
@@ -38,7 +41,7 @@ public class PtarmiganChannel {
     //
     void initialize(long shortChannelId,
                     TransactionOutPoint fundingOutpoint,
-                    boolean fundingTxUnspent) {
+                    int fundingTxUnspent) {
         if (shortChannelId != 0) {
             this.shortChannelId.initialize(shortChannelId);
         }
@@ -69,13 +72,31 @@ public class PtarmiganChannel {
     TransactionOutPoint getFundingOutpoint() {
         return this.fundingOutpoint;
     }
-    boolean getFundingTxUnspent() {
+    //
+    int getFundingTxUnspent() {
         return this.fundingTxUnspent;
     }
     //
+    boolean isFundingTx(TransactionOutPoint outPont) {
+        return (this.fundingOutpoint != null) && this.fundingOutpoint.equals(outPont);
+    }
+    //
     void setFundingTxSpent() {
-        logger.debug("setFundingTxSpent(node=" + Hex.toHexString(this.peerNodeId) + ")");
-        this.fundingTxUnspent = false;
+        setFundingTxSpentValue(Ptarmigan.CHECKUNSPENT_SPENT);
+    }
+    //
+    void setFundingTxSpentValue(int checkUnspent) {
+        logger.debug("setFundingTxSpent(node=" + Hex.toHexString(this.peerNodeId) + ")=" + checkUnspent);
+        this.fundingTxUnspent = checkUnspent;
+    }
+    //
+    Sha256Hash getLastUnspentHash() {
+        return this.lastUnspentHash;
+    }
+    //
+    void setLastUnspentHash(@Nullable Sha256Hash failHash) {
+        logger.debug("setLastUnspentHash(node=" + Hex.toHexString(this.peerNodeId) + ")=" + failHash.toString());
+        this.lastUnspentHash = failHash;
     }
     //
     void setConfirmation(int conf) {

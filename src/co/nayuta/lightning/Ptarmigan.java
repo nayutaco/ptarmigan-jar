@@ -68,6 +68,7 @@ public class Ptarmigan {
     private HashMap<String, PtarmiganChannel> mapChannel = new HashMap<>();
     private HashMap<Sha256Hash, SendRawTxResult> mapSendTx = new HashMap<>();
     private Sha256Hash creationHash;
+    private int connectedPeerIndex = 0;
     private int downloadFailCount = 0;
     private int peerFailCount = 0;
     private Logger logger;
@@ -391,7 +392,7 @@ public class Ptarmigan {
                         logger.debug("unilateral close: remote");
                         break;
                     }
-                    ch.getCommitTxid(index).unspent = false;
+                    ch.getCommitTxid(index).unspent = Ptarmigan.CHECKUNSPENT_SPENT;
                     mapChannel.put(Hex.toHexString(ch.peerNodeId()), ch);
                 }
             }
@@ -709,7 +710,7 @@ public class Ptarmigan {
             logger.error("getTxConfirmationFromBlock: rethrow: " + getStackTrace(e));
             throw e;
         } catch (Exception e) {
-            logger.error("getTxConfirmationFromBlock: " + getStackTrace(e));
+            logger.error("getTxConfirmationFromBlock(): " + getStackTrace(e));
         }
         logger.error("getTxConfirmationFromBlock: fail confirm");
         return 0;
@@ -1072,6 +1073,8 @@ public class Ptarmigan {
         int retval;
         TransactionOutPoint outPoint = new TransactionOutPoint(params, vIndex, Sha256Hash.wrapReversed(txid));
         logger.debug("checkUnspent(): outPoint=" + outPoint.toString());
+        boolean isFundingTx = false;
+        PtarmiganChannel channel = null;
 
         if (peerId != null) {
             logger.debug("    peerId=" + Hex.toHexString(peerId));
@@ -1079,7 +1082,8 @@ public class Ptarmigan {
                 logger.debug("    unknown peer");
                 return CHECKUNSPENT_FAIL;
             }
-            PtarmiganChannel channel = mapChannel.get(Hex.toHexString(peerId));
+            channel = mapChannel.get(Hex.toHexString(peerId));
+            isFundingTx = channel.isFundingTx(outPoint);
             retval = checkUnspentChannel(channel, outPoint);
             if (retval != CHECKUNSPENT_FAIL) {
                 logger.debug("  result1=" + retval);
@@ -1101,6 +1105,10 @@ public class Ptarmigan {
 
         // search until wallet creation time
         retval = checkUnspentFromBlock(null, outPoint);
+        if (isFundingTx) {
+            channel.setFundingTxSpentValue(retval);
+            mapChannel.put(Hex.toHexString(channel.peerNodeId()), channel);
+        }
         return retval;
     }
 
@@ -1115,13 +1123,13 @@ public class Ptarmigan {
         if ((channel.getFundingOutpoint() != null) && channel.getFundingOutpoint().equals(outPoint)) {
             // funding_tx
             logger.debug("    funding unspent=" + channel.getFundingTxUnspent());
-            return channel.getFundingTxUnspent() ? CHECKUNSPENT_UNSPENT : CHECKUNSPENT_SPENT;
+            return channel.getFundingTxUnspent();
         } else {
             // commit_tx
             PtarmiganChannel.CommitTxid commit_tx = channel.getCommitTxid((int)outPoint.getIndex());
             if ((commit_tx != null) && (commit_tx.txid != null)) {
                 logger.debug("    commit_tx unspent=" + commit_tx.unspent);
-                return commit_tx.unspent ? CHECKUNSPENT_UNSPENT : CHECKUNSPENT_SPENT;
+                return commit_tx.unspent;
             }
         }
         return CHECKUNSPENT_FAIL;
@@ -1137,12 +1145,20 @@ public class Ptarmigan {
      */
     private int checkUnspentFromBlock(PtarmiganChannel channel, TransactionOutPoint outPoint) {
         logger.debug("checkUnspentFromBlock(): outPoint=" + outPoint.toString());
+        boolean isFundingTx = (channel != null) && channel.isFundingTx(outPoint);
 
-        Sha256Hash blockHash = wak.wallet().getLastBlockSeenHash();
+        Sha256Hash blockHash = null;
+        if (isFundingTx) {
+            blockHash = channel.getLastUnspentHash();
+        }
+        if (blockHash == null) {
+            blockHash = wak.wallet().getLastBlockSeenHash();
+        }
         if (blockHash == null) {
             return CHECKUNSPENT_FAIL;
         }
         try {
+            int depth = 0;
             while (true) {
                 Block block = getBlock(blockHash);
                 if (block == null) {
@@ -1164,17 +1180,14 @@ public class Ptarmigan {
                             }
                             logger.debug("   input:" + pnt.toString());
                             if (pnt.equals(outPoint)) {
-                                if ((channel != null) && (channel.getFundingOutpoint().equals(outPoint))) {
-                                    logger.debug("checkUnspentFromBlock() ----> SPENT funding_tx!");
-                                    channel.setFundingTxSpent();
-                                    mapChannel.put(Hex.toHexString(channel.peerNodeId()), channel);
-                                } else {
-                                    logger.debug("checkUnspentFromBlock() ----> detect!");
-                                }
+                                logger.debug("checkUnspentFromBlock() ----> SPENT!");
                                 return CHECKUNSPENT_SPENT;
                             }
                         }
                     }
+                }
+                if (isFundingTx) {
+                    channel.setLastUnspentHash(blockHash);
                 }
 
                 //check last block
@@ -1186,6 +1199,9 @@ public class Ptarmigan {
                     logger.debug(" stop by minedHash");
                     break;
                 }
+                depth++;
+                logger.debug("checkUnspentFromBlock() depth=" + depth);
+
                 // ひとつ前のブロック
                 blockHash = block.getPrevBlockHash();
             }
@@ -1197,6 +1213,9 @@ public class Ptarmigan {
         }
 
         logger.debug("checkUnspentFromBlock(): vin not found");
+        if (channel != null) {
+            channel.setLastUnspentHash(null);
+        }
         return CHECKUNSPENT_UNSPENT;
     }
 
@@ -1311,7 +1330,7 @@ public class Ptarmigan {
 
             //shortChannelIdが0以外ならheight, bIndex, vIndexが更新される
             //channel.initialize(shortChannelId, fundingOutpoint, (txRaw == null));
-            channel.initialize(shortChannelId, fundingOutpoint, true);  //とりあえずUNSPENTでやっておく
+            channel.initialize(shortChannelId, fundingOutpoint, CHECKUNSPENT_FAIL);
             channel.setMinedBlockHash(blockHash, minedHeight, -1);
             if (minedHeight > 0) {
                 logger.debug("setChannel: minedConfirm");
@@ -1328,13 +1347,14 @@ public class Ptarmigan {
             } catch (Exception e) {
                 logger.error("setChannel 2: " + getStackTrace(e));
             }
-            mapChannel.put(Hex.toHexString(channel.peerNodeId()), channel);
             logger.debug("setChannel: add channel: " + Hex.toHexString(peerId));
 
             int chk_un = checkUnspentFromBlock(channel, fundingOutpoint);
             logger.debug("setChannel: checkUnspent: " + chk_un);
+            channel.setFundingTxSpentValue(chk_un);
 
             debugShowRegisteredChannel();
+            mapChannel.put(Hex.toHexString(channel.peerNodeId()), channel);
             result = true;
         } catch (Exception e) {
             logger.error("setChannel: " + getStackTrace(e));
@@ -1441,8 +1461,13 @@ public class Ptarmigan {
      * @throws PtarmException   fail
      */
     private Peer getPeer() throws PtarmException {
-        Peer peer = wak.peerGroup().getDownloadPeer();
+        //Peer peer = wak.peerGroup().getDownloadPeer();
+        if (connectedPeerIndex >= wak.peerGroup().numConnectedPeers()) {
+            connectedPeerIndex = 0;
+        }
+        Peer peer = wak.peerGroup().getConnectedPeers().get(connectedPeerIndex);
         if (peer != null) {
+            logger.debug("getPeer()=" + connectedPeerIndex);
             peerFailCount = 0;
         } else {
             peerFailCount++;
@@ -1451,7 +1476,12 @@ public class Ptarmigan {
                 throw new PtarmException("getPeer: too many fail peer");
             }
         }
+        nextPeer();
         return peer;
+    }
+
+    private void nextPeer() {
+        connectedPeerIndex++;
     }
 
 
