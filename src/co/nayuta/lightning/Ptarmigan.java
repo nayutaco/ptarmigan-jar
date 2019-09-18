@@ -4,6 +4,7 @@ import com.squareup.moshi.Moshi;
 import org.bitcoinj.core.*;
 import org.bitcoinj.kits.WalletAppKit;
 import org.bitcoinj.script.Script;
+import org.bitcoinj.script.ScriptChunk;
 import org.bitcoinj.store.BlockStore;
 import org.bitcoinj.store.BlockStoreException;
 import org.bitcoinj.utils.Threading;
@@ -42,24 +43,25 @@ public class Ptarmigan {
     public static final int SPV_START_BJ = 2;
     public static final int SPV_START_ERR = 3;
     //
-    private static final int TIMEOUT_RETRY = 12;
-    private static final long TIMEOUT_START = 5;            //sec
-    private static final long TIMEOUT_SENDTX = 10000;       //msec
-    private static final long TIMEOUT_REJECT = 2000;        //msec
-    private static final long TIMEOUT_GET = 30000;          //msec
-    //
-    private static final int RETRY_SENDRAWTX = 3;
-    //
-    private static final String FILE_STARTUP = "bitcoinj_startup.log";
-    private static final String FILE_MNEMONIC = "bitcoinj_mnemonic.txt";
-    private static final String WALLET_PREFIX = "ptarm_p2wpkh";
-    //
     private static final int STARTUPLOG_CONT = 1;
     private static final int STARTUPLOG_STOP = 2;
     private static final int STARTUPLOG_BLOCK = 3;
     //
-    private static final int DOWNLOAD_FAIL_COUNT_MAX = 10;
-    private static final int PEER_FAIL_COUNT_MAX = 6;
+    private static final int TIMEOUT_RETRY = 12;
+    private static final long TIMEOUT_START = 5;            //sec
+    private static final long TIMEOUT_SENDTX = 10000;       //msec
+    private static final long TIMEOUT_REJECT = 2000;        //msec
+    private static final long TIMEOUT_GET = 10000;          //msec
+    //
+    private static final int RETRY_SENDRAWTX = 3;
+    private static final int RETRY_GETBLOCK = 10;
+    private static final int MAX_DOWNLOAD_FAIL = 10;
+    private static final int MAX_PEER_FAIL = 6;
+    private static final int OFFSET_CHECK_UNSPENT = 5;  //少し多めにチェックする
+    //
+    private static final String FILE_STARTUP = "bitcoinj_startup.log";
+    private static final String FILE_MNEMONIC = "bitcoinj_mnemonic.txt";
+    private static final String WALLET_PREFIX = "ptarm_p2wpkh";
     //
     private NetworkParameters params;
     private WalletAppKit wak;
@@ -1022,7 +1024,8 @@ public class Ptarmigan {
                 }
                 List<Transaction> txs = block.getTransactions();
                 if (txs == null) {
-                    continue;
+                    logger.error("checkBroadcast(): fail block txs");
+                    break;
                 }
                 for (Transaction tx : txs) {
                     if (tx.getTxId().equals(txHash)) {
@@ -1136,8 +1139,14 @@ public class Ptarmigan {
     }
 
 
-    /** 指定したtxのunspentチェック
-     *      blockCacheの各blockからvinをチェックする
+    /** 指定したoutPointのunspentチェック
+     *      各blockからvinのoutPointを比較し、存在すればSPENT、存在しなければさらに過去blockをたどる。
+     *
+     *      前回失敗したのであれば最後に成功したblock hashから再開する。
+     *      そうでない場合は、現在のblockから開始する。
+     *
+     *      たどるblock数は、channelがあればfunding_txの現在のblock heightから直近のconfirmation計測時のheight + OFFSET。
+     *      funding_tx以外であれば
      *
      * @param channel   channel(for limit block height)
      * @param outPoint  outpoint
@@ -1148,17 +1157,25 @@ public class Ptarmigan {
         boolean isFundingTx = (channel != null) && channel.isFundingTx(outPoint);
 
         Sha256Hash blockHash = null;
+        int depth = 0;      //遡る段数(0のとき、段数は考慮しない)
         if (isFundingTx) {
+            //exceptionで中断したところから再開(中断していないならnull)
             blockHash = channel.getLastUnspentHash();
         }
         if (blockHash == null) {
+            //最新blockから開始
             blockHash = wak.wallet().getLastBlockSeenHash();
         }
         if (blockHash == null) {
             return CHECKUNSPENT_FAIL;
         }
+        if (channel != null) {
+            int confHeight = channel.getShortChannelId().height + channel.getConfirmation() - 1;
+            depth = wak.wallet().getLastBlockSeenHeight() - confHeight + OFFSET_CHECK_UNSPENT;
+        }
+        logger.debug("checkUnspentFromBlock(): block=" + blockHash.toString());
+        logger.debug("checkUnspentFromBlock(): depth=" + depth);
         try {
-            int depth = 0;
             while (true) {
                 Block block = getBlock(blockHash);
                 if (block == null) {
@@ -1166,7 +1183,28 @@ public class Ptarmigan {
                     return CHECKUNSPENT_FAIL;
                 }
                 if (block.getTransactions() == null) {
-                    continue;
+                    logger.error("checkUnspentFromBlock: fail block txs");
+                    return CHECKUNSPENT_FAIL;
+                }
+                try {
+                    //logger.debug("COINBASE_BIP34=" + block.isBIP34());
+                    List<Transaction> txs = block.getTransactions();
+                    if ((txs != null) && txs.size() > 0 && (txs.get(0).getInputs().size() > 0)) {
+                        //logger.debug("COINBASE_toString=" + block.getTransactions().get(0).toString());
+                        Script scriptSig = txs.get(0).getInput(0).getScriptSig();
+                        //logger.debug("COINBASE_scriptSig=" + scriptSig.toString());
+                        ScriptChunk scriptChunk0 = scriptSig.getChunks().get(0);
+                        logger.debug("COINBASE_scriptChunk0=" + scriptChunk0.toString());
+                        logger.debug("COINBASE_scriptChunk0opcode=" + scriptChunk0.opcode);
+                        logger.debug("COINBASE_scriptChunk0Hex=" + Hex.toHexString(scriptChunk0.data));
+                        if (scriptChunk0.isPushData()) {
+                            long height = ((scriptChunk0.data[2] & 0xff) << 16) | ((scriptChunk0.data[1] & 0xff) << 8) | (scriptChunk0.data[0] & 0xff);
+                            logger.debug("COINBASE_height=" + height);
+                            block.verify((int) height, EnumSet.of(Block.VerifyFlag.HEIGHT_IN_COINBASE));
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.error("fail");
                 }
                 for (Transaction tx : block.getTransactions()) {
                     if ((tx != null) && (tx.getInputs() != null)) {
@@ -1178,7 +1216,7 @@ public class Ptarmigan {
                             if ((pnt == null) || (pnt.getHash().equals(Sha256Hash.ZERO_HASH))) {
                                 continue;
                             }
-                            logger.debug("   input:" + pnt.toString());
+                            //logger.debug("   input:" + pnt.toString());
                             if (pnt.equals(outPoint)) {
                                 logger.debug("checkUnspentFromBlock() ----> SPENT!");
                                 return CHECKUNSPENT_SPENT;
@@ -1199,7 +1237,12 @@ public class Ptarmigan {
                     logger.debug(" stop by minedHash");
                     break;
                 }
-                depth++;
+                depth--;
+                if (depth == 0) {
+                    //
+                    logger.debug("checkUnspentFromBlock() ");
+                    break;
+                }
                 logger.debug("checkUnspentFromBlock() depth=" + depth);
 
                 // ひとつ前のブロック
@@ -1316,6 +1359,11 @@ public class Ptarmigan {
                     (channel.getShortChannelId().height > 0) ) {
                 logger.debug("setChannel: update minedHeight from short_channel_id");
                 minedHeight = channel.getShortChannelId().height;
+            }
+            if (minedHeight == 0) {
+                //
+                minedHeight = getHeightFromBlock(blockHash);
+                logger.debug("setChannel: blockHeightFromBlock=" + minedHeight);
             }
             int blockHeight = wak.wallet().getLastBlockSeenHeight();
 
@@ -1472,7 +1520,7 @@ public class Ptarmigan {
         } else {
             peerFailCount++;
             logger.error("  getPeer(count=" + peerFailCount + ") - peer not found");
-            if (peerFailCount > PEER_FAIL_COUNT_MAX) {
+            if (peerFailCount > MAX_PEER_FAIL) {
                 throw new PtarmException("getPeer: too many fail peer");
             }
         }
@@ -1514,27 +1562,91 @@ public class Ptarmigan {
      */
     private Block getBlockFromPeer(Sha256Hash blockHash) throws PtarmException {
         Block block = null;
-        Peer peer = getPeer();
-        if (peer == null) {
-            logger.error("  getBlockFromPeer() - peer not found");
-            return null;
-        }
-        try {
-            block = peer.getBlock(blockHash).get(TIMEOUT_GET, TimeUnit.MILLISECONDS);
-            if (block != null) {
-                logger.debug("  getBlockFromPeer() " + blockHash.toString());
-                blockCache.put(blockHash, block);
-                downloadFailCount = 0;
+        for (int lp = 0; lp < RETRY_GETBLOCK; lp++) {
+            Peer peer = getPeer();
+            if (peer == null) {
+                logger.error("  getBlockFromPeer() - peer not found");
+                return null;
             }
-        } catch (Exception e) {
-            downloadFailCount++;
-            logger.error("getBlockFromPeer(count=" + downloadFailCount + "): " + getStackTrace(e));
-            if (downloadFailCount >= DOWNLOAD_FAIL_COUNT_MAX) {
-                //
-                throw new PtarmException("getBlockFromPeer: stop SPV: too many fail download");
+            try {
+                block = peer.getBlock(blockHash).get(TIMEOUT_GET, TimeUnit.MILLISECONDS);
+                if (block != null) {
+                    logger.debug("  getBlockFromPeer() " + blockHash.toString());
+                    blockCache.put(blockHash, block);
+                    downloadFailCount = 0;
+                }
+                break;
+            } catch (TimeoutException e) {
+                logger.error("  getBlockFromPeer(): Timeout==> retry");
+            } catch (Exception e) {
+                downloadFailCount++;
+                logger.error("getBlockFromPeer(count=" + downloadFailCount + "): " + getStackTrace(e));
+                if (downloadFailCount >= MAX_DOWNLOAD_FAIL) {
+                    //
+                    throw new PtarmException("getBlockFromPeer: stop SPV: too many fail download");
+                }
+                break;
             }
         }
         return block;
+    }
+
+
+
+    /** blockheight from blockhash
+     *
+     * @param blockHash target block hash
+     * @return  (>0)height, (==0)error
+     */
+    private int getHeightFromBlock(Sha256Hash blockHash) {
+        logger.debug("getHeightFromBlock(): blockHash=" + blockHash.toString());
+        long height = 0;
+        int depth = 0;
+
+        try {
+            while (true) {
+                Block block = getBlock(blockHash);
+                if (block == null) {
+                    logger.error("getHeightFromBlock: fail block");
+                    return 0;
+                }
+                if (block.getTransactions() == null) {
+                    logger.error("getHeightFromBlock: fail txs");
+                    return 0;
+                }
+                try {
+                    //logger.debug("COINBASE_BIP34=" + block.isBIP34());
+                    List<Transaction> txs = block.getTransactions();
+                    if ((txs != null) && txs.size() > 0 && (txs.get(0).getInputs().size() > 0)) {
+                        //logger.debug("COINBASE_toString=" + block.getTransactions().get(0).toString());
+                        Script scriptSig = txs.get(0).getInput(0).getScriptSig();
+                        //logger.debug("COINBASE_scriptSig=" + scriptSig.toString());
+                        ScriptChunk scriptChunk0 = scriptSig.getChunks().get(0);
+                        logger.debug("COINBASE_scriptChunk0=" + scriptChunk0.toString());
+                        logger.debug("COINBASE_scriptChunk0opcode=" + scriptChunk0.opcode);
+                        logger.debug("COINBASE_scriptChunk0Hex=" + Hex.toHexString(scriptChunk0.data));
+                        if (scriptChunk0.isPushData()) {
+                            height = ((scriptChunk0.data[2] & 0xff) << 16) | ((scriptChunk0.data[1] & 0xff) << 8) | (scriptChunk0.data[0] & 0xff);
+                            logger.debug("COINBASE_height=" + height);
+                            block.verify((int) height, EnumSet.of(Block.VerifyFlag.HEIGHT_IN_COINBASE));
+                            break;
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.error("fail");
+                }
+
+                depth++;
+                logger.debug("getHeightFromBlock() depth=" + depth);
+
+                // ひとつ前のブロック
+                blockHash = block.getPrevBlockHash();
+            }
+        } catch (Exception e) {
+            logger.error("getHeightFromBlock(): exception: " + getStackTrace(e));
+        }
+
+        return (int)height + depth;
     }
 
 

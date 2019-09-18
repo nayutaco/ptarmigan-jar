@@ -95,7 +95,7 @@ public class PtarmiganChannel {
     }
     //
     void setLastUnspentHash(@Nullable Sha256Hash failHash) {
-        logger.debug("setLastUnspentHash(node=" + Hex.toHexString(this.peerNodeId) + ")=" + failHash.toString());
+        logger.debug("setLastUnspentHash(node=" + Hex.toHexString(this.peerNodeId) + ")=" + ((failHash != null) ? failHash.toString() : "null"));
         this.lastUnspentHash = failHash;
     }
     //
