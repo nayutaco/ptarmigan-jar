@@ -57,6 +57,7 @@ public class Ptarmigan {
     private static final int RETRY_GETBLOCK = 10;
     private static final int MAX_DOWNLOAD_FAIL = 10;
     private static final int MAX_PEER_FAIL = 6;
+    private static final int MAX_HEIGHT_FAIL = 50;
     private static final int OFFSET_CHECK_UNSPENT = 5;  //少し多めにチェックする
     //
     private static final String FILE_STARTUP = "bitcoinj_startup.log";
@@ -1094,15 +1095,17 @@ public class Ptarmigan {
                 return CHECKUNSPENT_FAIL;
             }
             channel = mapChannel.get(Hex.toHexString(peerId));
-            if ((channel != null) && Sha256Hash.ZERO_HASH.equals(channel.getMinedBlockHash())) {
-                logger.error("checkBroadcast(): minedHash=ZERO");
-                return CHECKUNSPENT_FAIL;
-            }
-            isFundingTx = channel.isFundingTx(outPoint);
-            retval = checkUnspentChannel(channel, outPoint);
-            if (retval != CHECKUNSPENT_FAIL) {
-                logger.debug("  result1=" + retval);
-                return retval;
+            if (channel != null) {
+                if (Sha256Hash.ZERO_HASH.equals(channel.getMinedBlockHash())) {
+                    logger.error("checkBroadcast(): minedHash=ZERO");
+                    return CHECKUNSPENT_FAIL;
+                }
+                isFundingTx = channel.isFundingTx(outPoint);
+                retval = checkUnspentChannel(channel, outPoint);
+                if (retval != CHECKUNSPENT_FAIL) {
+                    logger.debug("  result1=" + retval);
+                    return retval;
+                }
             }
         }
 
@@ -1338,28 +1341,27 @@ public class Ptarmigan {
             }
             //
             int minedHeight = 0;
-            if (prevConfirm > 0) {
-                try {
-                    BlockStore bs = wak.chain().getBlockStore();
-                    StoredBlock sb = bs.get(blockHash);
-                    if (sb != null) {
-                        minedHeight = sb.getHeight();
-                    } else {
-                        logger.error("setChannel: fail StoredBlock");
-                    }
-                } catch (BlockStoreException e) {
-                    logger.error("setChannel 1: " + getStackTrace(e));
+            try {
+                BlockStore bs = wak.chain().getBlockStore();
+                StoredBlock sb = bs.get(blockHash);
+                if (sb != null) {
+                    minedHeight = sb.getHeight();
+                    logger.debug("setChannel: update minedHeight from BlockStore: " + minedHeight);
+                } else {
+                    logger.error("setChannel: fail StoredBlock");
                 }
+            } catch (BlockStoreException e) {
+                logger.error("setChannel 1: " + getStackTrace(e));
             }
             if ( (minedHeight == 0) &&
                     (channel.getShortChannelId() != null) &&
                     (channel.getShortChannelId().height > 0) ) {
-                logger.debug("setChannel: update minedHeight from short_channel_id");
                 minedHeight = channel.getShortChannelId().height;
+                logger.debug("setChannel: update minedHeight from short_channel_id: " + minedHeight);
             }
             if (minedHeight == 0) {
                 minedHeight = getHeightFromBlock(blockHash);
-                logger.debug("setChannel: blockHeightFromBlock=" + minedHeight);
+                logger.debug("setChannel: update minedHeight from blockHeightFromBlock: " + minedHeight);
             }
             int blockHeight = wak.wallet().getLastBlockSeenHeight();
 
