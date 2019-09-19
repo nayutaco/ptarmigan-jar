@@ -1626,6 +1626,10 @@ public class Ptarmigan {
                 }
 
                 depth++;
+                if (depth > MAX_HEIGHT_FAIL) {
+                    logger.error("getHeightFromBlock: fail too many depth");
+                    return 0;
+                }
                 logger.debug("getHeightFromBlock() depth=" + depth);
 
                 // ひとつ前のブロック
