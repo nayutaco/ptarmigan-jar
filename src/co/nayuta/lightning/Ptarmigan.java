@@ -129,7 +129,6 @@ public class Ptarmigan {
 
         logger.info("Version: " + VERSION);
         logger.info("bitcoinj " + VersionMessage.BITCOINJ_VERSION);
-        saveDownloadLog(STARTUPLOG_CONT, "SPV:" + VERSION);
         try {
             Thread.sleep(2000);
         } catch (InterruptedException e) {
@@ -570,9 +569,9 @@ public class Ptarmigan {
      */
     public int getBlockCount(@Nullable byte[] blockHash) throws PtarmException {
         int blockHeight = wak.wallet().getLastBlockSeenHeight();
-        logger.debug("getBlockCount()  count=" + blockHeight);
+        logger.debug("getBlockCount(): count=" + blockHeight);
         if (getPeer() == null) {
-            logger.error("  getBlockCount() - peer not found");
+            logger.error("getBlockCount(): peer not found");
             blockHeight = 0;
         }
         if (blockHash != null) {
@@ -580,9 +579,9 @@ public class Ptarmigan {
             Sha256Hash bhash = wak.wallet().getLastBlockSeenHash();
             if (bhash != null) {
                 bhashBytes = bhash.getReversedBytes();
-                logger.debug("  hash=" + Hex.toHexString(bhashBytes));
+                logger.debug("getBlockCount(): hash=" + bhash.toString());
             } else {
-                logger.debug("  no block hash");
+                logger.debug("getBlockCount(): no block hash");
                 bhashBytes = Sha256Hash.ZERO_HASH.getBytes();
             }
             System.arraycopy(bhashBytes, 0, blockHash, 0, bhashBytes.length);
@@ -599,7 +598,7 @@ public class Ptarmigan {
      */
     public byte[] getGenesisBlockHash() {
         Sha256Hash hash = wak.params().getGenesisBlock().getHash();
-        logger.debug("getGenesisBlockHash()  hash=" + hash.toString());
+        logger.debug("getGenesisBlockHash(): hash=" + hash.toString());
         return hash.getReversedBytes();
     }
 
@@ -841,7 +840,7 @@ public class Ptarmigan {
             logger.error("  searchOutPoint(): fail no blockhash");
             return result;
         }
-        logger.debug("  searchOutPoint(): blockhash=" + blockHash.toString() + ", depth=" + depth);
+        logger.debug("searchOutPoint(): blockhash=" + blockHash.toString() + ", depth=" + depth);
         int blockcount = wak.wallet().getLastBlockSeenHeight();
         for (int i = 0; i < depth; i++) {
             Block blk = getBlock(blockHash);
@@ -884,6 +883,7 @@ public class Ptarmigan {
         for (int i = 0; i < depth; i++) {
             Block blk = getBlock(blockHash);
             if (blk == null || blk.getTransactions() == null) {
+                logger.error("searchVout(): fail block");
                 break;
             }
             for (Transaction tx : blk.getTransactions()) {
@@ -925,7 +925,7 @@ public class Ptarmigan {
             return req.tx.bitcoinSerialize();
 
         } catch (Exception e) {
-            logger.error("signRawTx: " + getStackTrace(e));
+            logger.error("signRawTx(): " + getStackTrace(e));
         }
         return null;
     }
@@ -1097,13 +1097,13 @@ public class Ptarmigan {
             channel = mapChannel.get(Hex.toHexString(peerId));
             if (channel != null) {
                 if (Sha256Hash.ZERO_HASH.equals(channel.getMinedBlockHash())) {
-                    logger.error("checkBroadcast(): minedHash=ZERO");
+                    logger.error("checkUnspent(): minedHash=ZERO");
                     return CHECKUNSPENT_FAIL;
                 }
                 isFundingTx = channel.isFundingTx(outPoint);
                 retval = checkUnspentChannel(channel, outPoint);
                 if (retval != CHECKUNSPENT_FAIL) {
-                    logger.debug("  result1=" + retval);
+                    logger.debug("checkUnspent(): from channel=" + checkUnspentString(retval));
                     return retval;
                 }
             }
@@ -1116,7 +1116,7 @@ public class Ptarmigan {
             }
             retval = checkUnspentChannel(ch, outPoint);
             if (retval != CHECKUNSPENT_FAIL) {
-                logger.debug("  result2=" + retval);
+                logger.debug("checkUnspent(): from ALL channel=" + checkUnspentString(retval));
                 return retval;
             }
         }
@@ -1140,13 +1140,13 @@ public class Ptarmigan {
     private int checkUnspentChannel(PtarmiganChannel channel, TransactionOutPoint outPoint) {
         if ((channel.getFundingOutpoint() != null) && channel.getFundingOutpoint().equals(outPoint)) {
             // funding_tx
-            logger.debug("    funding unspent=" + channel.getFundingTxUnspent());
+            logger.debug("checkUnspentChannel(): funding unspent=" + checkUnspentString(channel.getFundingTxUnspent()));
             return channel.getFundingTxUnspent();
         } else {
             // commit_tx
             PtarmiganChannel.CommitTxid commit_tx = channel.getCommitTxid((int)outPoint.getIndex());
             if ((commit_tx != null) && (commit_tx.txid != null)) {
-                logger.debug("    commit_tx unspent=" + commit_tx.unspent);
+                logger.debug("checkUnspentChannel(): commit_tx unspent=" + checkUnspentString(commit_tx.unspent));
                 return commit_tx.unspent;
             }
         }
@@ -1170,7 +1170,7 @@ public class Ptarmigan {
     private int checkUnspentFromBlock(PtarmiganChannel channel, TransactionOutPoint outPoint) {
         logger.debug("checkUnspentFromBlock(): outPoint=" + outPoint.toString());
         if ((channel != null) && Sha256Hash.ZERO_HASH.equals(channel.getMinedBlockHash())) {
-            logger.error("checkBroadcast(): minedHash=ZERO");
+            logger.error("checkUnspentFromBlock(): minedHash=ZERO");
             return CHECKUNSPENT_FAIL;
         }
         boolean isFundingTx = (channel != null) && channel.isFundingTx(outPoint);
@@ -1190,9 +1190,11 @@ public class Ptarmigan {
             return CHECKUNSPENT_FAIL;
         }
         if ((channel != null) && (channel.getShortChannelId() != null)) {
+            logger.debug("height: short_channel_id=" + channel.getShortChannelId().height + ", conf=" + channel.getConfirmation());
             int confHeight = channel.getShortChannelId().height + channel.getConfirmation() - 1;
             depth = wak.wallet().getLastBlockSeenHeight() - confHeight + OFFSET_CHECK_UNSPENT;
         }
+        logger.debug("checkUnspentFromBlock(): currentHeight=" + wak.wallet().getLastBlockSeenHeight());
         logger.debug("checkUnspentFromBlock(): block=" + blockHash.toString());
         logger.debug("checkUnspentFromBlock(): depth=" + depth);
         try {
@@ -1260,6 +1262,15 @@ public class Ptarmigan {
             channel.setLastUnspentHash(null);
         }
         return CHECKUNSPENT_UNSPENT;
+    }
+
+    private String checkUnspentString(int spent) {
+        switch (spent) {
+            case CHECKUNSPENT_FAIL: return "FAIL";
+            case CHECKUNSPENT_UNSPENT: return "UNSPENT";
+            case CHECKUNSPENT_SPENT: return "SPENT";
+            default: return "unknown";
+        }
     }
 
 
