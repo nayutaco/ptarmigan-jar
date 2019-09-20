@@ -100,12 +100,8 @@ public class PtarmiganChannel {
     }
     //
     void setConfirmation(int conf) {
-        if (conf != 0) {
-            this.confirmation = conf;
-            logger.debug("setConfirmation=" + this.confirmation + "(node=" + Hex.toHexString(this.peerNodeId) + ")");
-        } else {
-            throw new NullPointerException();
-        }
+        this.confirmation = conf;
+        logger.debug("setConfirmation=" + this.confirmation + "(node=" + Hex.toHexString(this.peerNodeId) + ")");
     }
     int getConfirmation() {
         return this.confirmation;
