@@ -1189,9 +1189,12 @@ public class Ptarmigan {
             logger.error("checkUnspentFromBlock: FAIL blockHash");
             return CHECKUNSPENT_FAIL;
         }
+        int confHeight = 0;
         if ((channel != null) && (channel.getShortChannelId() != null)) {
             logger.debug("height: short_channel_id=" + channel.getShortChannelId().height + ", conf=" + channel.getConfirmation());
-            int confHeight = channel.getShortChannelId().height + channel.getConfirmation() - 1;
+            confHeight = channel.getShortChannelId().height + channel.getConfirmation() - 1;
+        }
+        if (confHeight > 0) {
             depth = wak.wallet().getLastBlockSeenHeight() - confHeight + OFFSET_CHECK_UNSPENT;
         }
         logger.debug("checkUnspentFromBlock(): currentHeight=" + wak.wallet().getLastBlockSeenHeight());
@@ -1389,12 +1392,20 @@ public class Ptarmigan {
             //channel.initialize(shortChannelId, fundingOutpoint, (txRaw == null));
             channel.initialize(shortChannelId, fundingOutpoint, CHECKUNSPENT_FAIL);
             channel.setMinedBlockHash(blockHash, minedHeight, -1);
+
+            //check unspent before update confirmation
+            channel.setConfirmation(lastConfirm);
+            if (!Sha256Hash.ZERO_HASH.equals(blockHash)) {
+                int chk_un = checkUnspentFromBlock(channel, fundingOutpoint);
+                logger.debug("setChannel: checkUnspent: " + chk_un);
+                channel.setFundingTxSpentValue(chk_un);
+            } else {
+                logger.debug("setChannel: checkUnspent: SKIP");
+            }
+
             if (minedHeight > 0) {
                 logger.debug("setChannel: minedConfirm");
                 channel.setConfirmation(blockHeight - minedHeight + 1);
-            } else if (lastConfirm > 0) {
-                logger.debug("setChannel: lastConfirm");
-                channel.setConfirmation(lastConfirm);
             } else {
                 logger.debug("setChannel: confirm not set");
             }
@@ -1405,14 +1416,6 @@ public class Ptarmigan {
                 logger.error("setChannel 2: " + getStackTrace(e));
             }
             logger.debug("setChannel: add channel: " + Hex.toHexString(peerId));
-
-            if (!Sha256Hash.ZERO_HASH.equals(blockHash)) {
-                int chk_un = checkUnspentFromBlock(channel, fundingOutpoint);
-                logger.debug("setChannel: checkUnspent: " + chk_un);
-                channel.setFundingTxSpentValue(chk_un);
-            } else {
-                logger.debug("setChannel: checkUnspent: SKIP");
-            }
 
             debugShowRegisteredChannel();
             mapChannel.put(Hex.toHexString(channel.peerNodeId()), channel);
