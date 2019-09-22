@@ -51,7 +51,7 @@ public class Ptarmigan {
     private static final long TIMEOUT_START = 5;            //sec
     private static final long TIMEOUT_SENDTX = 10000;       //msec
     private static final long TIMEOUT_REJECT = 2000;        //msec
-    private static final long TIMEOUT_GET = 10000;          //msec
+    private static final long TIMEOUT_GETBLOCK = 3000;      //msec
     //
     private static final int RETRY_SENDRAWTX = 3;
     private static final int RETRY_GETBLOCK = 10;
@@ -1200,6 +1200,9 @@ public class Ptarmigan {
         logger.debug("checkUnspentFromBlock(): currentHeight=" + wak.wallet().getLastBlockSeenHeight());
         logger.debug("checkUnspentFromBlock(): block=" + blockHash.toString());
         logger.debug("checkUnspentFromBlock(): depth=" + depth);
+        if ((channel != null) && blockHash.equals(channel.getMinedBlockHash())) {
+            logger.debug("checkUnspentFromBlock(): minedHash=" + channel.getMinedBlockHash());
+        }
         try {
             while (true) {
                 Block block = getBlock(blockHash);
@@ -1211,6 +1214,8 @@ public class Ptarmigan {
                     logger.error("checkUnspentFromBlock: FAIL block txs");
                     return CHECKUNSPENT_FAIL;
                 }
+                String blockName = blockHash.toString();
+                saveDownloadLog(STARTUPLOG_BLOCK, "..." + blockName.substring((Sha256Hash.LENGTH - 3) * 2));
                 for (Transaction tx : block.getTransactions()) {
                     if ((tx != null) && (tx.getInputs() != null)) {
                         for (TransactionInput vin : tx.getInputs()) {
@@ -1589,7 +1594,7 @@ public class Ptarmigan {
                 return null;
             }
             try {
-                block = peer.getBlock(blockHash).get(TIMEOUT_GET, TimeUnit.MILLISECONDS);
+                block = peer.getBlock(blockHash).get(TIMEOUT_GETBLOCK, TimeUnit.MILLISECONDS);
                 if (block != null) {
                     logger.debug("  getBlockFromPeer() " + blockHash.toString());
                     blockCache.put(blockHash, block);
@@ -1749,7 +1754,7 @@ public class Ptarmigan {
                 logger.error("  getPeerMempoolTransaction() - peer not found");
                 return null;
             }
-            return peer.getPeerMempoolTransaction(txHash).get(TIMEOUT_GET, TimeUnit.MILLISECONDS);
+            return peer.getPeerMempoolTransaction(txHash).get(TIMEOUT_GETBLOCK, TimeUnit.MILLISECONDS);
         } catch (Exception e) {
             logger.error("getPeerMempoolTransaction(): " + getStackTrace(e));
         }
