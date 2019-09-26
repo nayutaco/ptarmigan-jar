@@ -1497,6 +1497,7 @@ public class Ptarmigan {
         try {
             Address address = Address.fromString(params, sendAddress);
             SendRequest sendRequest = SendRequest.emptyWallet(address);
+            sendRequest.feePerKb = Coin.valueOf(estimateFee());
             wak.wallet().completeTx(sendRequest);
             tx = sendRequest.tx;
             Transaction txl = wak.peerGroup().broadcastTransaction(tx).future().get(TIMEOUT_SENDTX, TimeUnit.MILLISECONDS);
