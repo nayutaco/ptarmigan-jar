@@ -55,7 +55,7 @@ public class Ptarmigan {
     //
     private static final int RETRY_SENDRAWTX = 3;
     private static final int RETRY_GETBLOCK = 10;
-    private static final int MAX_DOWNLOAD_FAIL = 10;
+    private static final int MAX_DOWNLOAD_FAIL = PeerGroup.DEFAULT_CONNECTIONS * 2;
     private static final int MAX_PEER_FAIL = 6;
     private static final int MAX_HEIGHT_FAIL = 50;
     private static final int OFFSET_CHECK_UNSPENT = 5;  //少し多めにチェックする
@@ -1602,16 +1602,17 @@ public class Ptarmigan {
                     downloadFailCount = 0;
                 }
                 break;
-            } catch (TimeoutException e) {
-                logger.error("  getBlockFromPeer(): Timeout==> retry");
             } catch (Exception e) {
                 downloadFailCount++;
-                logger.error("getBlockFromPeer(count=" + downloadFailCount + "): " + getStackTrace(e));
+                logger.error("getBlockFromPeer(count=" + downloadFailCount + ")");
                 if (downloadFailCount >= MAX_DOWNLOAD_FAIL) {
-                    //
                     throw new PtarmException("getBlockFromPeer: stop SPV: too many fail download");
                 }
-                break;
+                if (e instanceof TimeoutException) {
+                    logger.error("  getBlockFromPeer(): Timeout==> retry");
+                } else {
+                    break;
+                }
             }
         }
         return block;
