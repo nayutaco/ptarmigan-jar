@@ -51,7 +51,7 @@ public class Ptarmigan {
     private static final long TIMEOUT_START = 5;            //sec
     private static final long TIMEOUT_SENDTX = 10000;       //msec
     private static final long TIMEOUT_REJECT = 2000;        //msec
-    private static final long TIMEOUT_GETBLOCK = 3000;      //msec
+    private static final long TIMEOUT_GETBLOCK = 15000;      //msec
     //
     private static final int RETRY_SENDRAWTX = 3;
     private static final int RETRY_GETBLOCK = 10;
