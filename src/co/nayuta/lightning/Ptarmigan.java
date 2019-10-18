@@ -51,10 +51,10 @@ public class Ptarmigan {
     private static final long TIMEOUT_START = 5;            //sec
     private static final long TIMEOUT_SENDTX = 10000;       //msec
     private static final long TIMEOUT_REJECT = 2000;        //msec
-    private static final long TIMEOUT_GETBLOCK = 15000;      //msec
+    private static final long TIMEOUT_GETBLOCK = 15000;      //msec     //TIMEOUT_GETBLOCK * RETRY_GETBLOCK が rpi_ptarm.shの$PTARMD_REBOOTに関係することに注意
     //
     private static final int RETRY_SENDRAWTX = 3;
-    private static final int RETRY_GETBLOCK = 10;
+    private static final int RETRY_GETBLOCK = 12;
     private static final int MAX_DOWNLOAD_FAIL = PeerGroup.DEFAULT_CONNECTIONS * 2;
     private static final int MAX_PEER_FAIL = 6;
     private static final int MAX_HEIGHT_FAIL = 50;
