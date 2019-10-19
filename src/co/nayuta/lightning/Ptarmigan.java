@@ -1345,6 +1345,7 @@ public class Ptarmigan {
         boolean result = false;
         logger.debug("setChannel() peerId=" + Hex.toHexString(peerId));
         try {
+            boolean resultResult = true;
             TransactionOutPoint fundingOutpoint = new TransactionOutPoint(params, vIndex, Sha256Hash.wrapReversed(txid));
             Sha256Hash blockHash = Sha256Hash.wrapReversed(blockHashBytes);
             //
@@ -1404,6 +1405,9 @@ public class Ptarmigan {
                 int chk_un = checkUnspentFromBlock(channel, fundingOutpoint);
                 logger.debug("setChannel: checkUnspent: " + chk_un);
                 channel.setFundingTxSpentValue(chk_un);
+                if (chk_un < 0) {
+                    resultResult = false;
+                }
             } else {
                 logger.debug("setChannel: checkUnspent: SKIP");
             }
@@ -1424,7 +1428,7 @@ public class Ptarmigan {
 
             debugShowRegisteredChannel();
             mapChannel.put(Hex.toHexString(channel.peerNodeId()), channel);
-            result = true;
+            result = resultResult;
         } catch (Exception e) {
             logger.error("setChannel: " + getStackTrace(e));
         }
@@ -1531,23 +1535,30 @@ public class Ptarmigan {
      * @throws PtarmException   fail
      */
     private Peer getPeer() throws PtarmException {
-        //Peer peer = wak.peerGroup().getDownloadPeer();
-        if (connectedPeerIndex >= wak.peerGroup().numConnectedPeers()) {
-            connectedPeerIndex = 0;
-        }
-        Peer peer = wak.peerGroup().getConnectedPeers().get(connectedPeerIndex);
-        if (peer != null) {
-            logger.debug("getPeer()=" + connectedPeerIndex);
-            peerFailCount = 0;
-        } else {
-            peerFailCount++;
-            logger.error("  getPeer(count=" + peerFailCount + ") - peer not found");
-            if (peerFailCount > MAX_PEER_FAIL) {
-                throw new PtarmException("getPeer: too many fail peer");
+        try {
+            //Peer peer = wak.peerGroup().getDownloadPeer();
+            if (connectedPeerIndex >= wak.peerGroup().numConnectedPeers()) {
+                connectedPeerIndex = 0;
             }
+            Peer peer = wak.peerGroup().getConnectedPeers().get(connectedPeerIndex);
+            if (peer != null) {
+                logger.debug("getPeer()=" + connectedPeerIndex);
+                peerFailCount = 0;
+            } else {
+                peerFailCount++;
+                logger.error("  getPeer(count=" + peerFailCount + ") - peer not found");
+                if (peerFailCount > MAX_PEER_FAIL) {
+                    throw new PtarmException("getPeer: too many fail peer");
+                }
+            }
+            nextPeer();
+            return peer;
+        } catch (PtarmException e) {
+            throw e;
+        } catch (Exception e) {
+            getStackTrace(e);
         }
-        nextPeer();
-        return peer;
+        return null;
     }
 
     private void nextPeer() {
@@ -1592,7 +1603,7 @@ public class Ptarmigan {
             Peer peer = getPeer();
             if (peer == null) {
                 logger.error("  getBlockFromPeer() - peer not found");
-                return null;
+                continue;
             }
             try {
                 block = peer.getBlock(blockHash).get(TIMEOUT_GETBLOCK, TimeUnit.MILLISECONDS);
