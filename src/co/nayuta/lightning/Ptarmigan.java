@@ -182,7 +182,8 @@ public class Ptarmigan {
         try {
             logger.debug("spv_start: start WalletAppKit");
             saveDownloadLog(STARTUPLOG_CONT, "Blocks..");
-            wak = new WalletAppKit(params,
+            Context context = new Context(params);
+            wak = new WalletAppKit(context,
                     Script.ScriptType.P2WPKH,
                     KeyChainGroupStructure.DEFAULT,
                     new File("./wallet" + pmtProtocolId), WALLET_PREFIX) {
@@ -204,6 +205,7 @@ public class Ptarmigan {
                 logger.error("spv_start: already running");
                 return SPV_START_FILE;
             }
+            Context.propagate(context);
             logger.debug("spv_start: startAsync()");
             wak.startAsync();
         } catch (IOException e) {
