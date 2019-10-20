@@ -112,7 +112,8 @@ public class Ptarmigan {
      **************************************************************************/
 
     static class PtarmException extends Exception {
-        PtarmException(String reason) {
+        PtarmException(String reason, Logger logger) {
+            logger.error(reason);
             System.out.println("PtarmException: " + reason);
             System.out.flush();
         }
@@ -1550,7 +1551,7 @@ public class Ptarmigan {
                 peerFailCount++;
                 logger.error("  getPeer(count=" + peerFailCount + ") - peer not found");
                 if (peerFailCount > MAX_PEER_FAIL) {
-                    throw new PtarmException("getPeer: too many fail peer");
+                    throw new PtarmException("getPeer: too many fail peer", logger);
                 }
             }
             nextPeer();
@@ -1619,7 +1620,7 @@ public class Ptarmigan {
                 downloadFailCount++;
                 logger.error("getBlockFromPeer(count=" + downloadFailCount + ")");
                 if (downloadFailCount >= MAX_DOWNLOAD_FAIL) {
-                    throw new PtarmException("getBlockFromPeer: stop SPV: too many fail download");
+                    throw new PtarmException("getBlockFromPeer: stop SPV: too many fail download", logger);
                 }
                 if (e instanceof TimeoutException) {
                     logger.error("  getBlockFromPeer(): Timeout==> retry");
