@@ -55,7 +55,8 @@ public class Ptarmigan {
     //
     private static final int RETRY_SENDRAWTX = 3;
     private static final int RETRY_GETBLOCK = 12;
-    private static final int MAX_DOWNLOAD_FAIL = PeerGroup.DEFAULT_CONNECTIONS * 2;
+    private static final int MAX_CONNECTIONS = PeerGroup.DEFAULT_CONNECTIONS;
+    private static final int MAX_DOWNLOAD_FAIL = MAX_CONNECTIONS * 2;
     private static final int MAX_PEER_FAIL = 6;
     private static final int MAX_HEIGHT_FAIL = 50;
     private static final int OFFSET_CHECK_UNSPENT = 5;  //少し多めにチェックする
@@ -65,8 +66,8 @@ public class Ptarmigan {
     private static final String PREFIX_WALLET = "ptarm_p2wpkh";
     private static final String PREFIX_LASTBLOCK = "lastblock_";
     //
-    private NetworkParameters params;
-    private WalletAppKit wak;
+    private static NetworkParameters params;
+    private static WalletAppKit wak;
     private LinkedHashMap<Sha256Hash, Block> blockCache = new LinkedHashMap<>();
     private HashMap<Sha256Hash, Transaction> txCache = new HashMap<>();
     private HashMap<String, PtarmiganChannel> mapChannel = new HashMap<>();
@@ -200,6 +201,7 @@ public class Ptarmigan {
                     if (blockHeight != -1) {
                         System.out.print("(" + blockHeight + ")");
                     }
+                    peerGroup().setMaxConnections(MAX_CONNECTIONS);
                     logger.debug("spv_start: onSetupCompleted - exit");
                 }
             };
@@ -576,7 +578,8 @@ public class Ptarmigan {
         logger.debug("getBlockCount(): count=" + blockHeight);
         if (getPeer() == null) {
             logger.error("getBlockCount(): peer not found");
-            blockHeight = 0;
+            failPeer();
+            //blockHeight = 0;
         }
         if (blockHash != null) {
             byte[] bhashBytes;
@@ -1243,35 +1246,54 @@ public class Ptarmigan {
                 }
                 String blockName = blockHash.toString();
                 saveDownloadLog(STARTUPLOG_BLOCK, "..." + blockName.substring((Sha256Hash.LENGTH - 3) * 2));
+                int blockIndex = 0;
+                boolean exitLoop = false;
                 for (Transaction tx : block.getTransactions()) {
-                    if ((tx != null) && (tx.getInputs() != null)) {
-                        for (TransactionInput vin : tx.getInputs()) {
-                            if (vin == null) {
-                                continue;
+                    if (tx != null) {
+                        if ((channel != null) && (channel.getConfirmation() == 0)) {
+                            //search mined block
+                            if (tx.getTxId().equals(channel.getFundingOutpoint().getHash())) {
+                                logger.debug("checkUnspentFromBlock() find minedBlock ----> UNSPENT");
+                                int height = getHeightFromBlock(blockHash);
+                                channel.setMinedBlockHash(blockHash, height, blockIndex);
+                                exitLoop = true;
+                                break;
                             }
-                            TransactionOutPoint pnt = vin.getOutpoint();
-                            if ((pnt == null) || (pnt.getHash().equals(Sha256Hash.ZERO_HASH))) {
-                                continue;
-                            }
-                            //logger.debug("   input:" + pnt.toString());
-                            if (pnt.equals(outPoint)) {
-                                logger.debug("checkUnspentFromBlock() ----> SPENT!");
-                                return CHECKUNSPENT_SPENT;
+                        }
+                        if (tx.getInputs() != null) {
+                            for (TransactionInput vin : tx.getInputs()) {
+                                if (vin == null) {
+                                    continue;
+                                }
+                                TransactionOutPoint pnt = vin.getOutpoint();
+                                if ((pnt == null) || (pnt.getHash().equals(Sha256Hash.ZERO_HASH))) {
+                                    continue;
+                                }
+                                //logger.debug("   input:" + pnt.toString());
+                                if (pnt.equals(outPoint)) {
+                                    logger.debug("checkUnspentFromBlock() ----> SPENT!");
+                                    return CHECKUNSPENT_SPENT;
+                                }
                             }
                         }
                     }
+                    blockIndex++;
                 }
-                if (isFundingTx) {
+                if (isFundingTx && (channel != null)) {
                     channel.setLastUnspentHash(blockHash);
                 }
 
                 //check last block
-                if (blockHash.equals(creationHash)) {
-                    logger.debug(" stop by creationHash");
+                if (exitLoop) {
+                    logger.debug(" stop by fundingTx");
                     break;
                 }
                 if ((channel != null) && blockHash.equals(channel.getMinedBlockHash())) {
                     logger.debug(" stop by minedHash");
+                    break;
+                }
+                if (blockHash.equals(creationHash)) {
+                    logger.debug(" stop by creationHash");
                     break;
                 }
                 depth--;
@@ -1616,19 +1638,28 @@ public class Ptarmigan {
                 logger.debug("getPeer()=" + connectedPeerIndex);
                 peerFailCount = 0;
             } else {
-                nextPeer();
-                peerFailCount++;
-                logger.error("  getPeer(count=" + peerFailCount + ") - peer not found");
-                if (peerFailCount > MAX_PEER_FAIL) {
-                    throw new PtarmException("getPeer: too many fail peer", logger);
-                }
+                failPeer();
             }
+            nextPeer();
             return peer;
+        } catch (PtarmException e) {
+            logger.error("getPeer(): rethrow");
+            throw e;
         } catch (Exception e) {
             getStackTrace(e);
         }
         return null;
     }
+
+
+    private void failPeer() throws PtarmException {
+        peerFailCount++;
+        logger.error("  getPeer(count=" + peerFailCount + ") - peer not found");
+        if (peerFailCount > MAX_PEER_FAIL) {
+            throw new PtarmException("getPeer: too many fail peer", logger);
+        }
+    }
+
 
     private void nextPeer() throws PtarmException {
         if (wak.peerGroup().numConnectedPeers() == 0) {
@@ -1638,6 +1669,16 @@ public class Ptarmigan {
         if (connectedPeerIndex >= wak.peerGroup().numConnectedPeers()) {
             connectedPeerIndex = 0;
         }
+    }
+
+
+    private void debugPeerInfo(int peerIndex) {
+        Peer peer = wak.peerGroup().getConnectedPeers().get(peerIndex);
+        if (peer != null) {
+            logger.debug("peer[" + peerIndex + "] info: " + peer.toString());
+            logger.debug("lastPing=" + peer.getLastPingTime());
+        }
+
     }
 
 
@@ -1682,6 +1723,7 @@ public class Ptarmigan {
             }
             try {
                 block = peer.getBlock(blockHash).get(TIMEOUT_GETBLOCK, TimeUnit.MILLISECONDS);
+                //block = peer.getBlock(blockHash).get();
                 if (block != null) {
                     logger.debug("  getBlockFromPeer() " + blockHash.toString());
                     blockCache.put(blockHash, block);
@@ -1695,8 +1737,8 @@ public class Ptarmigan {
                     throw new PtarmException("getBlockFromPeer: stop SPV: too many fail download", logger);
                 }
                 if (e instanceof TimeoutException) {
-                    nextPeer();
                     logger.error("  getBlockFromPeer(): Timeout==> retry");
+                    debugPeerInfo(connectedPeerIndex);
                 } else {
                     break;
                 }
