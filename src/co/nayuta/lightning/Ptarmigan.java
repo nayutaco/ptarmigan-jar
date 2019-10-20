@@ -62,7 +62,8 @@ public class Ptarmigan {
     //
     private static final String FILE_STARTUP = "bitcoinj_startup.log";
     private static final String FILE_MNEMONIC = "bitcoinj_mnemonic.txt";
-    private static final String WALLET_PREFIX = "ptarm_p2wpkh";
+    private static final String PREFIX_WALLET = "ptarm_p2wpkh";
+    private static final String PREFIX_LASTBLOCK = "lastblock_";
     //
     private NetworkParameters params;
     private WalletAppKit wak;
@@ -187,7 +188,7 @@ public class Ptarmigan {
             wak = new WalletAppKit(context,
                     Script.ScriptType.P2WPKH,
                     KeyChainGroupStructure.DEFAULT,
-                    new File("./wallet" + pmtProtocolId), WALLET_PREFIX) {
+                    new File("./wallet" + pmtProtocolId), PREFIX_WALLET) {
                 @Override
                 protected void onSetupCompleted() {
                     logger.debug("spv_start: onSetupCompleted");
@@ -534,7 +535,7 @@ public class Ptarmigan {
     private void removeChainFile() {
         wak.stopAsync();
         String chainFilename = wak.directory().getAbsolutePath() +
-                FileSystems.getDefault().getSeparator() + WALLET_PREFIX + ".spvchain";
+                FileSystems.getDefault().getSeparator() + PREFIX_WALLET + ".spvchain";
         Path chainPathOriginal = Paths.get(chainFilename);
         Path chainPathBackup = Paths.get(chainFilename + ".bak");
         try {
@@ -1157,41 +1158,61 @@ public class Ptarmigan {
     }
 
 
-    /** 指定したoutPointのunspentチェック
-     *      各blockからvinのoutPointを比較し、存在すればSPENT、存在しなければさらに過去blockをたどる。
-     *
-     *      前回失敗したのであれば最後に成功したblock hashから再開する。
-     *      そうでない場合は、現在のblockから開始する。
-     *
-     *      たどるblock数は、channelがあればfunding_txの現在のblock heightから直近のconfirmation計測時のheight + OFFSET。
-     *      funding_tx以外であれば最大でwallet作成時まで遡る
-     *
-     * @param channel   channel(for limit block height)
-     * @param outPoint  outpoint
-     * @return  CHECKUNSPENT_xxx
-     */
     private int checkUnspentFromBlock(PtarmiganChannel channel, TransactionOutPoint outPoint) {
+        return checkUnspentFromBlock(channel, outPoint, null, null);
+    }
+
+
+    private int checkUnspentFromBlock(
+            PtarmiganChannel channel,
+            TransactionOutPoint outPoint,
+            Sha256Hash blockHash,
+            Sha256Hash[] lastBlock) {
+        boolean isFundingTx = (channel != null) && channel.isFundingTx(outPoint);
+        if (blockHash == null) {
+            if (isFundingTx) {
+                //exceptionで中断nしたところから再開(中断していないならnull)
+                blockHash = channel.getLastUnspentHash();
+            }
+            if (blockHash == null) {
+                //最新blockから開始
+                blockHash = wak.wallet().getLastBlockSeenHash();
+            }
+            if (blockHash == null) {
+                logger.error("checkUnspentFromBlock: FAIL blockHash");
+                return CHECKUNSPENT_FAIL;
+            }
+        }
+        logger.debug("checkUnspentFromBlock: blockHash=" + blockHash.toString());
+        return checkUnspentFromBlock(channel, outPoint, blockHash, lastBlock, isFundingTx);
+    }
+
+        /** 指定したoutPointのunspentチェック
+         *      各blockからvinのoutPointを比較し、存在すればSPENT、存在しなければさらに過去blockをたどる。
+         *
+         *      前回失敗したのであれば最後に成功したblock hashから再開する。
+         *      そうでない場合は、現在のblockから開始する。
+         *
+         *      たどるblock数は、channelがあればfunding_txの現在のblock heightから直近のconfirmation計測時のheight + OFFSET。
+         *      funding_tx以外であれば最大でwallet作成時まで遡る
+         *
+         * @param channel   channel(for limit block height)
+         * @param outPoint  outpoint
+         * @return  CHECKUNSPENT_xxx
+         */
+    private int checkUnspentFromBlock(
+            PtarmiganChannel channel,
+            TransactionOutPoint outPoint,
+            Sha256Hash blockHash,
+            Sha256Hash[] lastBlock,
+            boolean isFundingTx) {
         logger.debug("checkUnspentFromBlock(): outPoint=" + outPoint.toString());
         if ((channel != null) && Sha256Hash.ZERO_HASH.equals(channel.getMinedBlockHash())) {
             logger.error("checkUnspentFromBlock(): minedHash=ZERO");
             return CHECKUNSPENT_FAIL;
         }
-        boolean isFundingTx = (channel != null) && channel.isFundingTx(outPoint);
 
-        Sha256Hash blockHash = null;
         int depth = 0;      //遡る段数(0のとき、段数は考慮しない)
-        if (isFundingTx) {
-            //exceptionで中断したところから再開(中断していないならnull)
-            blockHash = channel.getLastUnspentHash();
-        }
-        if (blockHash == null) {
-            //最新blockから開始
-            blockHash = wak.wallet().getLastBlockSeenHash();
-        }
-        if (blockHash == null) {
-            logger.error("checkUnspentFromBlock: FAIL blockHash");
-            return CHECKUNSPENT_FAIL;
-        }
         int confHeight = 0;
         if ((channel != null) && (channel.getShortChannelId() != null)) {
             logger.debug("height: short_channel_id=" + channel.getShortChannelId().height + ", conf=" + channel.getConfirmation());
@@ -1208,6 +1229,9 @@ public class Ptarmigan {
         }
         try {
             while (true) {
+                if (lastBlock != null) {
+                    lastBlock[0] = blockHash;
+                }
                 Block block = getBlock(blockHash);
                 if (block == null) {
                     logger.error("checkUnspentFromBlock: FAIL block");
@@ -1405,11 +1429,17 @@ public class Ptarmigan {
             //check unspent before update confirmation
             channel.setConfirmation(lastConfirm);
             if (!Sha256Hash.ZERO_HASH.equals(blockHash)) {
-                int chk_un = checkUnspentFromBlock(channel, fundingOutpoint);
+                Sha256Hash[] loadHash = new Sha256Hash[1];
+                Sha256Hash[] lastBlock = new Sha256Hash[1];
+                loadSuspendBlock(peerId, loadHash);
+                int chk_un = checkUnspentFromBlock(channel, fundingOutpoint, loadHash[0], lastBlock);
                 logger.debug("setChannel: checkUnspent: " + chk_un);
                 channel.setFundingTxSpentValue(chk_un);
                 if (chk_un < 0) {
                     resultResult = false;
+                    saveSuspendBlock(peerId, lastBlock[0]);
+                } else {
+                    removeSuspendBlock(peerId);
                 }
             } else {
                 logger.debug("setChannel: checkUnspent: SKIP");
@@ -1437,6 +1467,47 @@ public class Ptarmigan {
         }
         logger.debug("setChannel: exit(" + result + ")");
         return result;
+    }
+
+
+    private void loadSuspendBlock(byte[] peerId, Sha256Hash[] lastBlock) {
+        try {
+            String fname = "./" + PREFIX_LASTBLOCK + Hex.toHexString(peerId) + ".txt";
+            FileReader fileReader = new FileReader(fname);
+            char[] cbuf = new char[Sha256Hash.LENGTH * 2];
+            int ret = fileReader.read(cbuf, 0, cbuf.length);
+            if (ret == cbuf.length) {
+                lastBlock[0] = Sha256Hash.wrap(Hex.decode(String.valueOf(cbuf)));
+                logger.debug("load: " + lastBlock[0].toString());
+            } else {
+                logger.debug("fail: " + ret);
+            }
+        } catch (Exception e) {
+            getStackTrace(e);
+        }
+    }
+
+    private void saveSuspendBlock(byte[] peerId, Sha256Hash lastBlock) {
+        try {
+            String fname = "./" + PREFIX_LASTBLOCK + Hex.toHexString(peerId) + ".txt";
+            FileWriter fileWriter = new FileWriter(fname, false);
+            fileWriter.write(lastBlock.toString());
+            fileWriter.close();
+            logger.debug("save: " + fname);
+        } catch (IOException e) {
+            logger.error("FileWriter: "+ getStackTrace(e));
+        }
+    }
+
+
+    private void removeSuspendBlock(byte[] peerId) {
+        try {
+            String fname = "./" + PREFIX_LASTBLOCK + Hex.toHexString(peerId) + ".txt";
+            Files.delete(Paths.get(fname));
+            logger.debug("remove: " + fname);
+        } catch (IOException eFile) {
+            //
+        }
     }
 
 
@@ -1540,32 +1611,33 @@ public class Ptarmigan {
     private Peer getPeer() throws PtarmException {
         try {
             //Peer peer = wak.peerGroup().getDownloadPeer();
-            if (connectedPeerIndex >= wak.peerGroup().numConnectedPeers()) {
-                connectedPeerIndex = 0;
-            }
             Peer peer = wak.peerGroup().getConnectedPeers().get(connectedPeerIndex);
             if (peer != null) {
                 logger.debug("getPeer()=" + connectedPeerIndex);
                 peerFailCount = 0;
             } else {
+                nextPeer();
                 peerFailCount++;
                 logger.error("  getPeer(count=" + peerFailCount + ") - peer not found");
                 if (peerFailCount > MAX_PEER_FAIL) {
                     throw new PtarmException("getPeer: too many fail peer", logger);
                 }
             }
-            nextPeer();
             return peer;
-        } catch (PtarmException e) {
-            throw e;
         } catch (Exception e) {
             getStackTrace(e);
         }
         return null;
     }
 
-    private void nextPeer() {
+    private void nextPeer() throws PtarmException {
+        if (wak.peerGroup().numConnectedPeers() == 0) {
+            throw new PtarmException("getPeer: no connected peers", logger);
+        }
         connectedPeerIndex++;
+        if (connectedPeerIndex >= wak.peerGroup().numConnectedPeers()) {
+            connectedPeerIndex = 0;
+        }
     }
 
 
@@ -1606,7 +1678,7 @@ public class Ptarmigan {
             Peer peer = getPeer();
             if (peer == null) {
                 logger.error("  getBlockFromPeer() - peer not found");
-                continue;
+                return null;
             }
             try {
                 block = peer.getBlock(blockHash).get(TIMEOUT_GETBLOCK, TimeUnit.MILLISECONDS);
@@ -1623,6 +1695,7 @@ public class Ptarmigan {
                     throw new PtarmException("getBlockFromPeer: stop SPV: too many fail download", logger);
                 }
                 if (e instanceof TimeoutException) {
+                    nextPeer();
                     logger.error("  getBlockFromPeer(): Timeout==> retry");
                 } else {
                     break;
