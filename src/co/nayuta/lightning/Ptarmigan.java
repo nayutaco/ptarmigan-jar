@@ -1674,12 +1674,13 @@ public class Ptarmigan {
 
 
     private void debugPeerInfo(int peerIndex) {
-        Peer peer = wak.peerGroup().getConnectedPeers().get(peerIndex);
-        if (peer != null) {
+        try {
+            Peer peer = wak.peerGroup().getConnectedPeers().get(peerIndex);
             logger.debug("peer[" + peerIndex + "] info: " + peer.toString());
             logger.debug("lastPing=" + peer.getLastPingTime());
+        } catch (Exception e) {
+            //
         }
-
     }
 
 
