@@ -55,11 +55,11 @@ public class Ptarmigan {
     //
     private static final int RETRY_SENDRAWTX = 3;
     private static final int RETRY_GETBLOCK = 12;
-    private static final int MAX_CONNECTIONS = PeerGroup.DEFAULT_CONNECTIONS;
+    private static final int MAX_CONNECTIONS = PeerGroup.DEFAULT_CONNECTIONS / 6;
     private static final int MAX_DOWNLOAD_FAIL = MAX_CONNECTIONS * 2;
     private static final int MAX_PEER_FAIL = 6;
     private static final int MAX_HEIGHT_FAIL = 50;
-    private static final int OFFSET_CHECK_UNSPENT = 5;  //少し多めにチェックする
+    private static final int OFFSET_CHECK_UNSPENT = 6;  //少し多めにチェックする
     //
     private static final String FILE_STARTUP = "bitcoinj_startup.log";
     private static final String FILE_MNEMONIC = "bitcoinj_mnemonic.txt";
@@ -202,6 +202,7 @@ public class Ptarmigan {
                         System.out.print("(" + blockHeight + ")");
                     }
                     peerGroup().setMaxConnections(MAX_CONNECTIONS);
+                    peerGroup().setStallThreshold(10, 1024);
                     logger.debug("spv_start: onSetupCompleted - exit");
                 }
             };
