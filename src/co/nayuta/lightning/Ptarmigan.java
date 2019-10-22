@@ -334,22 +334,22 @@ public class Ptarmigan {
             logger.debug("      outpoint: " + opnt.getHash().toString() + ":" + opnt.getIndex());
             sendEvent(tx);
         });
-        wak.wallet().addReorganizeEventListener(wallet -> {
-            logger.debug("  [CB]Reorganize: ->");
-        });
-        wak.wallet().addScriptsChangeEventListener((wallet, scripts, isAdding) -> {
-            logger.debug("  [CB]ScriptsChange: -> ");
-            logger.debug("    scripts: " + scripts);
-        });
-        wak.wallet().addKeyChainEventListener(keys -> {
-            logger.debug("  [CB]KeyChain: -> ");
-        });
-        wak.wallet().addTransactionConfidenceEventListener((wallet, tx) -> {
-            logger.debug("  [CB]TransactionConfidence: -> " + tx.getTxId());
-        });
-        wak.wallet().addChangeEventListener(wallet -> {
-            logger.debug("  [CB]WalletChange: -> " + wallet.getBalance().toFriendlyString());
-        });
+//        wak.wallet().addReorganizeEventListener(wallet -> {
+//            logger.debug("  [CB]Reorganize: ->");
+//        });
+//        wak.wallet().addScriptsChangeEventListener((wallet, scripts, isAdding) -> {
+//            logger.debug("  [CB]ScriptsChange: -> ");
+//            logger.debug("    scripts: " + scripts);
+//        });
+//        wak.wallet().addKeyChainEventListener(keys -> {
+//            logger.debug("  [CB]KeyChain: -> ");
+//        });
+//        wak.wallet().addTransactionConfidenceEventListener((wallet, tx) -> {
+//            logger.debug("  [CB]TransactionConfidence: -> " + tx.getTxId());
+//        });
+//        wak.wallet().addChangeEventListener(wallet -> {
+//            logger.debug("  [CB]WalletChange: -> " + wallet.getBalance().toFriendlyString());
+//        });
         logger.info("set callbacks: end");
     }
 
