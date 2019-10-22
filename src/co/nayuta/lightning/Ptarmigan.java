@@ -1516,6 +1516,7 @@ public class Ptarmigan {
             fileWriter.write(lastBlock.toString());
             fileWriter.close();
             logger.debug("save: " + fname);
+            logger.debug("    hash=" + lastBlock.toString());
         } catch (IOException e) {
             logger.error("FileWriter: "+ getStackTrace(e));
         }
