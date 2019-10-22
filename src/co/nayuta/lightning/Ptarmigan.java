@@ -1129,7 +1129,7 @@ public class Ptarmigan {
         }
 
         // search until wallet creation time
-        retval = checkUnspentFromBlock(null, outPoint);
+        retval = checkUnspentFromBlock(outPoint);
         if (isFundingTx) {
             channel.setFundingTxSpentValue(retval);
             mapChannel.put(Hex.toHexString(channel.peerNodeId()), channel);
@@ -1161,8 +1161,8 @@ public class Ptarmigan {
     }
 
 
-    private int checkUnspentFromBlock(PtarmiganChannel channel, TransactionOutPoint outPoint) {
-        return checkUnspentFromBlock(channel, outPoint, null, null);
+    private int checkUnspentFromBlock(TransactionOutPoint outPoint) {
+        return checkUnspentFromBlock(null, outPoint, null, null);
     }
 
 
