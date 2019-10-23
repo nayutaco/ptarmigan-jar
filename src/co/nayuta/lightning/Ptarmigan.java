@@ -53,13 +53,15 @@ public class Ptarmigan {
     private static final long TIMEOUT_REJECT = 2000;        //msec
     private static final long TIMEOUT_GETBLOCK = 60000;      //msec     //TIMEOUT_GETBLOCK * RETRY_GETBLOCK が rpi_ptarm.shの$PTARMD_REBOOTに関係することに注意
     //
-    private static final int MAX_CONNECTIONS = PeerGroup.DEFAULT_CONNECTIONS / 6;
+    private static final int MAX_CONNECTIONS = PeerGroup.DEFAULT_CONNECTIONS / 3;
     private static final int MAX_DOWNLOAD_FAIL = MAX_CONNECTIONS * 2;
     private static final int MAX_PEER_FAIL = 6;
     private static final int MAX_HEIGHT_FAIL = 50;
     private static final int RETRY_SENDRAWTX = 3;
     private static final int RETRY_GETBLOCK = MAX_CONNECTIONS * 2;
     private static final int OFFSET_CHECK_UNSPENT = 6;  //少し多めにチェックする
+    private static final int STALL_PERIOD = 10;
+    private static final int STALL_BYTES = 128;
     //
     private static final String FILE_STARTUP = "bitcoinj_startup.log";
     private static final String FILE_MNEMONIC = "bitcoinj_mnemonic.txt";
@@ -202,7 +204,7 @@ public class Ptarmigan {
                         System.out.print("(" + blockHeight + ")");
                     }
                     peerGroup().setMaxConnections(MAX_CONNECTIONS);
-                    peerGroup().setStallThreshold(10, 512);
+                    peerGroup().setStallThreshold(STALL_PERIOD, STALL_BYTES);
                     logger.debug("spv_start: onSetupCompleted - exit");
                 }
             };
