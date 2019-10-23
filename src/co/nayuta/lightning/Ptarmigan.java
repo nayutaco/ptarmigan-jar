@@ -51,14 +51,14 @@ public class Ptarmigan {
     private static final long TIMEOUT_START = 5;            //sec
     private static final long TIMEOUT_SENDTX = 10000;       //msec
     private static final long TIMEOUT_REJECT = 2000;        //msec
-    private static final long TIMEOUT_GETBLOCK = 15000;      //msec     //TIMEOUT_GETBLOCK * RETRY_GETBLOCK が rpi_ptarm.shの$PTARMD_REBOOTに関係することに注意
+    private static final long TIMEOUT_GETBLOCK = 60000;      //msec     //TIMEOUT_GETBLOCK * RETRY_GETBLOCK が rpi_ptarm.shの$PTARMD_REBOOTに関係することに注意
     //
-    private static final int RETRY_SENDRAWTX = 3;
-    private static final int RETRY_GETBLOCK = 12;
     private static final int MAX_CONNECTIONS = PeerGroup.DEFAULT_CONNECTIONS / 6;
     private static final int MAX_DOWNLOAD_FAIL = MAX_CONNECTIONS * 2;
     private static final int MAX_PEER_FAIL = 6;
     private static final int MAX_HEIGHT_FAIL = 50;
+    private static final int RETRY_SENDRAWTX = 3;
+    private static final int RETRY_GETBLOCK = MAX_CONNECTIONS * 2;
     private static final int OFFSET_CHECK_UNSPENT = 6;  //少し多めにチェックする
     //
     private static final String FILE_STARTUP = "bitcoinj_startup.log";
@@ -202,7 +202,7 @@ public class Ptarmigan {
                         System.out.print("(" + blockHeight + ")");
                     }
                     peerGroup().setMaxConnections(MAX_CONNECTIONS);
-                    peerGroup().setStallThreshold(10, 1024);
+                    peerGroup().setStallThreshold(10, 512);
                     logger.debug("spv_start: onSetupCompleted - exit");
                 }
             };
@@ -1251,7 +1251,7 @@ public class Ptarmigan {
                 boolean exitLoop = false;
                 for (Transaction tx : block.getTransactions()) {
                     if (tx != null) {
-                        if ((channel != null) && (channel.getConfirmation() == 0)) {
+                        if ((channel != null) && (channel.getConfirmation() <= 0)) {
                             //search mined block
                             if (tx.getTxId().equals(channel.getFundingOutpoint().getHash())) {
                                 logger.debug("checkUnspentFromBlock() find minedBlock ----> UNSPENT");
