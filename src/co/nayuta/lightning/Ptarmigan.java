@@ -1165,7 +1165,7 @@ public class Ptarmigan {
 
 
     private int checkUnspentFromBlock(TransactionOutPoint outPoint) {
-        return checkUnspentFromBlock(null, outPoint, null, null);
+        return checkUnspentFromBlock(null, outPoint, null, null, null);
     }
 
 
@@ -1173,7 +1173,8 @@ public class Ptarmigan {
             PtarmiganChannel channel,
             TransactionOutPoint outPoint,
             Sha256Hash blockHash,
-            Sha256Hash[] lastBlock) {
+            Sha256Hash[] lastBlock,
+            int[] loopDepth) {
         boolean isFundingTx = (channel != null) && channel.isFundingTx(outPoint);
         if (blockHash == null) {
             if (isFundingTx) {
@@ -1189,17 +1190,23 @@ public class Ptarmigan {
                 return CHECKUNSPENT_FAIL;
             }
         }
-        int depth = 0;      //遡る段数(0のとき、段数は考慮しない)
-        int confHeight = 0;
-        if ((channel != null) && (channel.getShortChannelId() != null)) {
-            logger.debug("height: short_channel_id=" + channel.getShortChannelId().height + ", conf=" + channel.getConfirmation());
-            confHeight = channel.getShortChannelId().height + channel.getConfirmation() - 1;
+        if (loopDepth == null) {
+            loopDepth = new int[] {0};
         }
-        if (confHeight > 0) {
-            depth = wak.wallet().getLastBlockSeenHeight() - confHeight + OFFSET_CHECK_UNSPENT;
+        if (loopDepth[0] == 0) {
+            int depth = 0;      //遡る段数(0のとき、段数は考慮しない)
+            int confHeight = 0;
+            if ((channel != null) && (channel.getShortChannelId() != null)) {
+                confHeight = channel.getShortChannelId().height + channel.getConfirmation() - 1;
+                if (confHeight > 0) {
+                    logger.debug("height: short_channel_id=" + channel.getShortChannelId().height + ", conf=" + channel.getConfirmation() + ", confHeight=" + confHeight);
+                    depth = wak.wallet().getLastBlockSeenHeight() - confHeight + OFFSET_CHECK_UNSPENT;
+                }
+            }
+            logger.debug("checkUnspentFromBlock: blockHash=" + blockHash.toString());
+            loopDepth[0] = depth;
         }
-        logger.debug("checkUnspentFromBlock: blockHash=" + blockHash.toString());
-        return checkUnspentFromBlock(channel, outPoint, blockHash, lastBlock, depth, isFundingTx);
+        return checkUnspentFromBlock(channel, outPoint, blockHash, lastBlock, loopDepth, isFundingTx);
     }
 
         /** 指定したoutPointのunspentチェック
@@ -1220,7 +1227,7 @@ public class Ptarmigan {
             TransactionOutPoint outPoint,
             Sha256Hash blockHash,
             Sha256Hash[] lastBlock,
-            int depth,
+            int[] loopDepth,
             boolean isFundingTx) {
         logger.debug("checkUnspentFromBlock(): outPoint=" + outPoint.toString());
         if ((channel != null) && Sha256Hash.ZERO_HASH.equals(channel.getMinedBlockHash())) {
@@ -1228,6 +1235,7 @@ public class Ptarmigan {
             return CHECKUNSPENT_FAIL;
         }
 
+        int depth = loopDepth[0];
         logger.debug("checkUnspentFromBlock(): currentHeight=" + wak.wallet().getLastBlockSeenHeight());
         logger.debug("checkUnspentFromBlock(): block=" + blockHash.toString());
         logger.debug("checkUnspentFromBlock(): depth=" + depth);
@@ -1238,6 +1246,7 @@ public class Ptarmigan {
             while (true) {
                 if (lastBlock != null) {
                     lastBlock[0] = blockHash;
+                    loopDepth[0] = depth;
                 }
                 Block block = getBlock(blockHash);
                 if (block == null) {
@@ -1456,13 +1465,14 @@ public class Ptarmigan {
             if (!Sha256Hash.ZERO_HASH.equals(blockHash)) {
                 Sha256Hash[] loadHash = new Sha256Hash[1];
                 Sha256Hash[] lastBlock = new Sha256Hash[1];
-                loadSuspendBlock(peerId, loadHash);
-                int chk_un = checkUnspentFromBlock(channel, fundingOutpoint, loadHash[0], lastBlock);
+                int[] loopDepth = new int[] { 0 };
+                loadSuspendBlock(peerId, loadHash, loopDepth);
+                int chk_un = checkUnspentFromBlock(channel, fundingOutpoint, loadHash[0], lastBlock, loopDepth);
                 logger.debug("setChannel: checkUnspent: " + chk_un);
                 channel.setFundingTxSpentValue(chk_un);
                 if (chk_un < 0) {
                     resultResult = false;
-                    saveSuspendBlock(peerId, lastBlock[0]);
+                    saveSuspendBlock(peerId, lastBlock[0], loopDepth[0]);
                 } else {
                     removeSuspendBlock(peerId);
                 }
@@ -1495,31 +1505,39 @@ public class Ptarmigan {
     }
 
 
-    private void loadSuspendBlock(byte[] peerId, Sha256Hash[] lastBlock) {
+    private void loadSuspendBlock(byte[] peerId, Sha256Hash[] lastBlock, int[] loopDepth) {
         try {
             String fname = "./" + PREFIX_LASTBLOCK + Hex.toHexString(peerId) + ".txt";
             FileReader fileReader = new FileReader(fname);
-            char[] cbuf = new char[Sha256Hash.LENGTH * 2];
-            int ret = fileReader.read(cbuf, 0, cbuf.length);
-            if (ret == cbuf.length) {
-                lastBlock[0] = Sha256Hash.wrap(Hex.decode(String.valueOf(cbuf)));
+            BufferedReader bufferedReader = new BufferedReader(fileReader);
+            String cHash = bufferedReader.readLine();
+            if (cHash.length() == Sha256Hash.LENGTH * 2) {
+                lastBlock[0] = Sha256Hash.wrap(Hex.decode(cHash));
                 logger.debug("load: " + lastBlock[0].toString());
             } else {
-                logger.debug("fail: " + ret);
+                logger.debug("fail block");
+            }
+            String cDepth = bufferedReader.readLine();
+            if (cDepth.length() > 0) {
+                loopDepth[0] = Integer.parseInt(cDepth);
+                logger.debug("depth: " + loopDepth[0]);
+            } else {
+                logger.debug("fail depth");
             }
         } catch (Exception e) {
             getStackTrace(e);
         }
     }
 
-    private void saveSuspendBlock(byte[] peerId, Sha256Hash lastBlock) {
+    private void saveSuspendBlock(byte[] peerId, Sha256Hash lastBlock, int depth) {
         try {
             String fname = "./" + PREFIX_LASTBLOCK + Hex.toHexString(peerId) + ".txt";
             FileWriter fileWriter = new FileWriter(fname, false);
-            fileWriter.write(lastBlock.toString());
+            fileWriter.write(lastBlock.toString() + "\n");
+            fileWriter.write(Integer.toString(depth) + "\n");
             fileWriter.close();
             logger.debug("save: " + fname);
-            logger.debug("    hash=" + lastBlock.toString());
+            logger.debug("    hash=" + lastBlock.toString() + ", depth=" + depth);
         } catch (IOException e) {
             logger.error("FileWriter: "+ getStackTrace(e));
         }
