@@ -1189,8 +1189,17 @@ public class Ptarmigan {
                 return CHECKUNSPENT_FAIL;
             }
         }
+        int depth = 0;      //遡る段数(0のとき、段数は考慮しない)
+        int confHeight = 0;
+        if ((channel != null) && (channel.getShortChannelId() != null)) {
+            logger.debug("height: short_channel_id=" + channel.getShortChannelId().height + ", conf=" + channel.getConfirmation());
+            confHeight = channel.getShortChannelId().height + channel.getConfirmation() - 1;
+        }
+        if (confHeight > 0) {
+            depth = wak.wallet().getLastBlockSeenHeight() - confHeight + OFFSET_CHECK_UNSPENT;
+        }
         logger.debug("checkUnspentFromBlock: blockHash=" + blockHash.toString());
-        return checkUnspentFromBlock(channel, outPoint, blockHash, lastBlock, isFundingTx);
+        return checkUnspentFromBlock(channel, outPoint, blockHash, lastBlock, depth, isFundingTx);
     }
 
         /** 指定したoutPointのunspentチェック
@@ -1211,6 +1220,7 @@ public class Ptarmigan {
             TransactionOutPoint outPoint,
             Sha256Hash blockHash,
             Sha256Hash[] lastBlock,
+            int depth,
             boolean isFundingTx) {
         logger.debug("checkUnspentFromBlock(): outPoint=" + outPoint.toString());
         if ((channel != null) && Sha256Hash.ZERO_HASH.equals(channel.getMinedBlockHash())) {
@@ -1218,15 +1228,6 @@ public class Ptarmigan {
             return CHECKUNSPENT_FAIL;
         }
 
-        int depth = 0;      //遡る段数(0のとき、段数は考慮しない)
-        int confHeight = 0;
-        if ((channel != null) && (channel.getShortChannelId() != null)) {
-            logger.debug("height: short_channel_id=" + channel.getShortChannelId().height + ", conf=" + channel.getConfirmation());
-            confHeight = channel.getShortChannelId().height + channel.getConfirmation() - 1;
-        }
-        if (confHeight > 0) {
-            depth = wak.wallet().getLastBlockSeenHeight() - confHeight + OFFSET_CHECK_UNSPENT;
-        }
         logger.debug("checkUnspentFromBlock(): currentHeight=" + wak.wallet().getLastBlockSeenHeight());
         logger.debug("checkUnspentFromBlock(): block=" + blockHash.toString());
         logger.debug("checkUnspentFromBlock(): depth=" + depth);
@@ -1301,8 +1302,7 @@ public class Ptarmigan {
                 }
                 depth--;
                 if (depth == 0) {
-                    //
-                    logger.debug("checkUnspentFromBlock() ");
+                    logger.debug(" stop by depth==0");
                     break;
                 }
                 logger.debug("checkUnspentFromBlock() depth=" + depth);
