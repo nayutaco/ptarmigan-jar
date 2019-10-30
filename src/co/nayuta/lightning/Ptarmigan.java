@@ -53,12 +53,12 @@ public class Ptarmigan {
     private static final long TIMEOUT_REJECT = 2000;        //msec
     private static final long TIMEOUT_GETBLOCK = 60000;      //msec     //TIMEOUT_GETBLOCK * RETRY_GETBLOCK が rpi_ptarm.shの$PTARMD_REBOOTに関係することに注意
     //
-    private static final int MAX_CONNECTIONS = PeerGroup.DEFAULT_CONNECTIONS / 3;
-    private static final int MAX_DOWNLOAD_FAIL = MAX_CONNECTIONS * 2;
+    private static final int MAX_CONNECTIONS = PeerGroup.DEFAULT_CONNECTIONS / 2;
+    private static final int MAX_DOWNLOAD_FAIL = MAX_CONNECTIONS;
     private static final int MAX_PEER_FAIL = 6;
     private static final int MAX_HEIGHT_FAIL = 50;
     private static final int RETRY_SENDRAWTX = 3;
-    private static final int RETRY_GETBLOCK = MAX_CONNECTIONS * 2;
+    private static final int RETRY_GETBLOCK = MAX_CONNECTIONS;
     private static final int OFFSET_CHECK_UNSPENT = 6;  //少し多めにチェックする
     private static final int STALL_PERIOD = 10;
     private static final int STALL_BYTES = 128;
@@ -78,6 +78,7 @@ public class Ptarmigan {
     private int connectedPeerIndex = 0;
     private int downloadFailCount = 0;
     private int peerFailCount = 0;
+    private boolean[] peerInvalid;
     private Logger logger;
 
 
@@ -131,6 +132,10 @@ public class Ptarmigan {
 
     public Ptarmigan() {
         logger = LoggerFactory.getLogger(this.getClass());
+        peerInvalid = new boolean[MAX_CONNECTIONS];
+        for (int lp = 0; lp < MAX_CONNECTIONS; lp++) {
+            peerInvalid[lp] = false;
+        }
 
         logger.info("Version: " + VERSION);
         logger.info("bitcoinj " + VersionMessage.BITCOINJ_VERSION);
@@ -507,6 +512,7 @@ public class Ptarmigan {
                 default:
                     prefix = "";
             }
+            logger.debug("saveDownloadLog():" + message);
             fileWriter.write(prefix + message);
             fileWriter.close();
         } catch (IOException e) {
@@ -1243,6 +1249,7 @@ public class Ptarmigan {
             logger.debug("checkUnspentFromBlock(): minedHash=" + channel.getMinedBlockHash());
         }
         try {
+            int blockHeight = -1;
             while (true) {
                 if (lastBlock != null) {
                     lastBlock[0] = blockHash;
@@ -1257,8 +1264,10 @@ public class Ptarmigan {
                     logger.error("checkUnspentFromBlock: FAIL block txs");
                     return CHECKUNSPENT_FAIL;
                 }
-                String blockName = blockHash.toString();
-                saveDownloadLog(STARTUPLOG_BLOCK, "..." + blockName.substring((Sha256Hash.LENGTH - 3) * 2));
+                if (blockHeight == -1) {
+                    blockHeight = getHeightFromBlock(block);
+                }
+                saveDownloadLog(STARTUPLOG_BLOCK, "..." + blockHeight);
                 int blockIndex = 0;
                 boolean exitLoop = false;
                 for (Transaction tx : block.getTransactions()) {
@@ -1267,8 +1276,7 @@ public class Ptarmigan {
                             //search mined block
                             if (tx.getTxId().equals(channel.getFundingOutpoint().getHash())) {
                                 logger.debug("checkUnspentFromBlock() find minedBlock ----> UNSPENT");
-                                int height = getHeightFromBlock(blockHash);
-                                channel.setMinedBlockHash(blockHash, height, blockIndex);
+                                channel.setMinedBlockHash(blockHash, blockHeight, blockIndex);
                                 exitLoop = true;
                                 break;
                             }
@@ -1318,6 +1326,7 @@ public class Ptarmigan {
 
                 // ひとつ前のブロック
                 blockHash = block.getPrevBlockHash();
+                blockHeight--;
             }
         } catch (Exception e) {
             //logger.error("checkUnspentFromBlock(): rethrow: " + getStackTrace(e));
@@ -1441,7 +1450,7 @@ public class Ptarmigan {
                 logger.debug("setChannel: update minedHeight from short_channel_id: " + minedHeight);
             }
             if (minedHeight == 0) {
-                minedHeight = getHeightFromBlock(blockHash);
+                minedHeight = getHeightFromBlockHash(blockHash);
                 logger.debug("setChannel: update minedHeight from blockHeightFromBlock: " + minedHeight);
             }
             int blockHeight = wak.wallet().getLastBlockSeenHeight();
@@ -1660,6 +1669,7 @@ public class Ptarmigan {
                 logger.debug("getPeer()=" + connectedPeerIndex);
                 peerFailCount = 0;
             } else {
+                setInvalidPeer(connectedPeerIndex);
                 failPeer();
             }
             nextPeer();
@@ -1683,13 +1693,28 @@ public class Ptarmigan {
     }
 
 
+    private void setInvalidPeer(int peerIndex) {
+        peerInvalid[peerIndex] = true;
+        logger.error("setInvalidPeer(): " + peerIndex);
+    }
+
+
     private void nextPeer() throws PtarmException {
         if (wak.peerGroup().numConnectedPeers() == 0) {
             throw new PtarmException("getPeer: no connected peers", logger);
         }
-        connectedPeerIndex++;
-        if (connectedPeerIndex >= wak.peerGroup().numConnectedPeers()) {
-            connectedPeerIndex = 0;
+        int nowIndex = connectedPeerIndex;
+        while (true) {
+            connectedPeerIndex++;
+            if (connectedPeerIndex >= wak.peerGroup().numConnectedPeers()) {
+                connectedPeerIndex = 0;
+            }
+            if (!peerInvalid[connectedPeerIndex]) {
+                break;
+            }
+            if (connectedPeerIndex == nowIndex) {
+                throw new PtarmException("getPeer: all invalid peer", logger);
+            }
         }
     }
 
@@ -1716,15 +1741,19 @@ public class Ptarmigan {
     private Block getBlock(Sha256Hash blockHash) throws PtarmException {
         logger.debug("getBlock():" + blockHash);
         if (Sha256Hash.ZERO_HASH.equals(blockHash)) {
-            logger.error("  getBlock() - zero");
+            logger.error("  getBlock(NG) - zero");
             return null;
         }
         if (blockCache.containsKey(blockHash)) {
-            logger.debug("  getBlock() - blockCache: " + blockHash.toString());
+            logger.debug("  getBlock(OK) - blockCache: " + blockHash.toString());
             return blockCache.get(blockHash);
         } else {
             Block block = getBlockFromPeer(blockHash);
-            logger.debug("  getBlock() : " + blockHash.toString());
+            if (block != null) {
+                logger.debug("  getBlock(OK) : " + blockHash.toString());
+            } else {
+                logger.error("  getBlock(NG) - null");
+            }
             return block;
         }
     }
@@ -1761,6 +1790,7 @@ public class Ptarmigan {
                 }
                 if (e instanceof TimeoutException) {
                     logger.error("  getBlockFromPeer(): Timeout==> retry");
+                    setInvalidPeer(connectedPeerIndex);
                     debugPeerInfo(connectedPeerIndex);
                 } else {
                     break;
@@ -1774,17 +1804,27 @@ public class Ptarmigan {
 
     /** blockheight from blockhash
      *
-     * @param blockHash target block hash
+     * @param blockHash target block hashge
      * @return  (>0)height, (==0)error
      */
-    private int getHeightFromBlock(Sha256Hash blockHash) {
-        logger.debug("getHeightFromBlock(): blockHash=" + blockHash.toString());
+    private int getHeightFromBlockHash(Sha256Hash blockHash) {
+        logger.debug("getHeightFromBlockHash(): blockHash=" + blockHash.toString());
+        try {
+            Block block = getBlock(blockHash);
+            return getHeightFromBlock(block);
+        } catch (Exception e) {
+            logger.error("getHeightFromBlock(): exception: " + getStackTrace(e));
+            return 0;
+        }
+    }
+    private int getHeightFromBlock(Block block) {
         long height = 0;
         int depth = 0;
+        String blockHashString = block.getHashAsString();
+        Sha256Hash blockHash = null;
 
         try {
             while (true) {
-                Block block = getBlock(blockHash);
                 if (block == null) {
                     logger.error("getHeightFromBlock: fail block");
                     return 0;
@@ -1807,12 +1847,15 @@ public class Ptarmigan {
 
                 // ひとつ前のブロック
                 blockHash = block.getPrevBlockHash();
+                block = getBlock(blockHash);
             }
         } catch (Exception e) {
             logger.error("getHeightFromBlock(): exception: " + getStackTrace(e));
         }
 
-        return (int)height + depth;
+        height += depth;
+        logger.debug("getHeightFromBlock(): height=" + height + ", blockHash=" + blockHashString);
+        return (int)height;
     }
 
 
@@ -1821,21 +1864,20 @@ public class Ptarmigan {
         try {
             List<Transaction> txs = block.getTransactions();
             if ((txs != null) && txs.size() > 0 && (txs.get(0).getInputs().size() > 0)) {
-                //logger.debug("COINBASE_toString=" + block.getTransactions().get(0).toString());
                 Script scriptSig = txs.get(0).getInput(0).getScriptSig();
-                //logger.debug("COINBASE_scriptSig=" + scriptSig.toString());
                 ScriptChunk scriptChunk0 = scriptSig.getChunks().get(0);
-                //logger.debug("COINBASE_scriptChunk0=" + scriptChunk0.toString());
-                //logger.debug("COINBASE_scriptChunk0opcode=" + scriptChunk0.opcode);
-                //logger.debug("COINBASE_scriptChunk0Hex=" + Hex.toHexString(scriptChunk0.data));
+                logger.debug("COINBASE_scriptChunk0=" + scriptChunk0.toString());
+                logger.debug("COINBASE_scriptChunk0opcode=" + scriptChunk0.opcode);
+                logger.debug("COINBASE_scriptChunk0Hex=" + Hex.toHexString(scriptChunk0.data));
                 if (scriptChunk0.isPushData() && (scriptChunk0.data != null) && (scriptChunk0.data.length == 3)) {
                     height = ((scriptChunk0.data[2] & 0xff) << 16) | ((scriptChunk0.data[1] & 0xff) << 8) | (scriptChunk0.data[0] & 0xff);
                     logger.debug("COINBASE_height=" + height);
                     block.verify((int) height, EnumSet.of(Block.VerifyFlag.HEIGHT_IN_COINBASE));
+                    logger.debug("getHeightFromCoinbase(): verified");
                 }
             }
         } catch (Exception e) {
-            logger.error("fail");
+            logger.error("getHeightFromCoinbase(): fail");
         }
 
         return height;
