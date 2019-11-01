@@ -176,7 +176,7 @@ public class Ptarmigan {
             saveSeedMnemonic();
         } else {
             System.err.println("fail: bitcoinj start");
-            saveDownloadLog(STARTUPLOG_STOP, "*restart DL");
+            saveDownloadLog(STARTUPLOG_CONT, "*continue");
         }
         logger.info("spv_start - exit");
         return ret;
