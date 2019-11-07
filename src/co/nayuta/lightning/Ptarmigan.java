@@ -28,7 +28,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 public class Ptarmigan {
-    private static final String VERSION = "0.0.6.x";
+    private static final String VERSION = "0.1.0.x";
     //
     public static final int CHECKUNSPENT_FAIL = -1;
     public static final int CHECKUNSPENT_UNSPENT = 0;
