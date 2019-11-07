@@ -858,26 +858,33 @@ public class Ptarmigan {
         }
         logger.debug("searchOutPoint(): blockhash=" + blockHash.toString() + ", depth=" + depth);
         int blockcount = wak.wallet().getLastBlockSeenHeight();
-        for (int i = 0; i < depth; i++) {
-            Block blk = getBlock(blockHash);
-            if (blk == null || blk.getTransactions() == null) {
-                logger.error("searchOutPoint(): fail get block");
-                return null;
-            }
-            logger.debug("searchOutPoint(" + blockcount + "):   blk=" + blk.getHashAsString());
-            for (Transaction tx : blk.getTransactions()) {
-                if (outPoint.equals(tx.getInput(0).getOutpoint())) {
-                    result.tx = tx.bitcoinSerialize();
-                    result.height = blockcount;
-                    logger.debug("searchOutPoint(): result=" + tx.getTxId() + ", height=" + result.height);
+        try {
+            for (int i = 0; i < depth; i++) {
+                Block blk = getBlock(blockHash);
+                if (blk == null || blk.getTransactions() == null) {
+                    logger.error("searchOutPoint(): fail get block");
+                    return null;
+                }
+                logger.debug("searchOutPoint(" + blockcount + "):   blk=" + blk.getHashAsString());
+                for (Transaction tx : blk.getTransactions()) {
+                    if (outPoint.equals(tx.getInput(0).getOutpoint())) {
+                        result.tx = tx.bitcoinSerialize();
+                        result.height = blockcount;
+                        logger.debug("searchOutPoint(): result=" + tx.getTxId() + ", height=" + result.height);
+                        break;
+                    }
+                }
+                if (result.tx != null) {
                     break;
                 }
+                blockHash = blk.getPrevBlockHash();
+                blockcount--;
             }
-            if (result.tx != null) {
-                break;
-            }
-            blockHash = blk.getPrevBlockHash();
-            blockcount--;
+        } catch (PtarmException e) {
+            logger.error("searchOutPoint: rethrow: " + getStackTrace(e));
+            throw e;
+        } catch (Exception e) {
+            logger.error("searchOutPoint(): " + getStackTrace(e));
         }
         return result;
     }
@@ -1811,7 +1818,12 @@ public class Ptarmigan {
         logger.debug("getHeightFromBlockHash(): blockHash=" + blockHash.toString());
         try {
             Block block = getBlock(blockHash);
-            return getHeightFromBlock(block);
+            if (block != null) {
+                return getHeightFromBlock(block);
+            } else {
+                logger.error("getHeightFromBlock(): block==null");
+                return 0;
+            }
         } catch (Exception e) {
             logger.error("getHeightFromBlock(): exception: " + getStackTrace(e));
             return 0;
@@ -1868,12 +1880,16 @@ public class Ptarmigan {
                 ScriptChunk scriptChunk0 = scriptSig.getChunks().get(0);
                 logger.debug("COINBASE_scriptChunk0=" + scriptChunk0.toString());
                 logger.debug("COINBASE_scriptChunk0opcode=" + scriptChunk0.opcode);
-                logger.debug("COINBASE_scriptChunk0Hex=" + Hex.toHexString(scriptChunk0.data));
-                if (scriptChunk0.isPushData() && (scriptChunk0.data != null) && (scriptChunk0.data.length == 3)) {
-                    height = ((scriptChunk0.data[2] & 0xff) << 16) | ((scriptChunk0.data[1] & 0xff) << 8) | (scriptChunk0.data[0] & 0xff);
-                    logger.debug("COINBASE_height=" + height);
-                    block.verify((int) height, EnumSet.of(Block.VerifyFlag.HEIGHT_IN_COINBASE));
-                    logger.debug("getHeightFromCoinbase(): verified");
+                if (scriptChunk0.data != null) {
+                    logger.debug("COINBASE_scriptChunk0Hex=" + Hex.toHexString(scriptChunk0.data));
+                    if (scriptChunk0.isPushData() && (scriptChunk0.data.length == 3)) {
+                        height = ((scriptChunk0.data[2] & 0xff) << 16) | ((scriptChunk0.data[1] & 0xff) << 8) | (scriptChunk0.data[0] & 0xff);
+                        logger.debug("COINBASE_height=" + height);
+                        block.verify((int) height, EnumSet.of(Block.VerifyFlag.HEIGHT_IN_COINBASE));
+                        logger.debug("getHeightFromCoinbase(): verified");
+                    }
+                } else {
+                    logger.debug("COINBASE_scriptChunk0Hex=null");
                 }
             }
         } catch (Exception e) {
