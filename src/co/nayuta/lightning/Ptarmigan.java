@@ -1502,15 +1502,9 @@ public class Ptarmigan {
                 int chk_un = checkUnspentFromBlock(channel, fundingOutpoint, loadHash[0], lastBlock, spentBlock, loopDepth);
                 logger.debug("setChannel: checkUnspent: " + chk_un);
                 channel.setFundingTxSpentValue(chk_un, spentBlock[0]);
-                switch (chk_un) {
-                    case CHECKUNSPENT_UNSPENT:
-                    case CHECKUNSPENT_SPENT:
-                        removeSuspendBlock(peerId);
-                        break;
-                    case CHECKUNSPENT_FAIL:
-                    default:
-                        resultResult = false;
-                        saveSuspendBlock(peerId, lastBlock[0], loopDepth[0]);
+                if ((chk_un != CHECKUNSPENT_UNSPENT) && (chk_un != CHECKUNSPENT_SPENT)) {
+                    resultResult = false;
+                    saveSuspendBlock(peerId, lastBlock[0], loopDepth[0]);
                 }
             } else {
                 logger.debug("setChannel: checkUnspent: SKIP");
@@ -1580,13 +1574,18 @@ public class Ptarmigan {
     }
 
 
-    private void removeSuspendBlock(byte[] peerId) {
-        try {
-            String fname = "./" + PREFIX_LASTBLOCK + Hex.toHexString(peerId) + ".txt";
-            Files.delete(Paths.get(fname));
-            logger.debug("remove: " + fname);
-        } catch (IOException eFile) {
-            //
+    public void removeSuspendBlock() {
+        for (PtarmiganChannel ch : mapChannel.values()) {
+            if (ch == null) {
+                continue;
+            }
+            try {
+                String fname = "./" + PREFIX_LASTBLOCK + Hex.toHexString(ch.peerNodeId()) + ".txt";
+                Files.delete(Paths.get(fname));
+                logger.debug("remove: " + fname);
+            } catch (Exception e) {
+                //
+            }
         }
     }
 
