@@ -395,7 +395,7 @@ public class Ptarmigan {
             logger.debug("   ch txid=" + fundingOutpoint.toString());
             if (targetOutpointTxid.equals(fundingOutpoint)) {
                 logger.debug("findRegisteredTx() ----> SPENT funding_tx!");
-                ch.setFundingTxSpent();
+                ch.setFundingTxSpentValue(CHECKUNSPENT_SPENT, Sha256Hash.ZERO_HASH);
             } else {
                 //おそらくこの部分は稼働していない(commit_txidを設定しないので)
                 int index = checkCommitTxids(ch, tx.getTxId());
@@ -851,10 +851,20 @@ public class Ptarmigan {
         TransactionOutPoint outPoint = new TransactionOutPoint(params, vIndex, Sha256Hash.wrapReversed(txid));
         logger.debug("searchOutPoint(): outPoint=" + outPoint.toString() + ", depth=" + depth);
         SearchOutPointResult result = new SearchOutPointResult();
-        Sha256Hash blockHash = wak.wallet().getLastBlockSeenHash();
-        if (blockHash == null) {
-            logger.error("  searchOutPoint(): fail no blockhash");
-            return result;
+        Sha256Hash blockHash;
+        PtarmiganChannel channel = getChannelFromFundingTx(outPoint.getHash());
+        if ( (channel != null)  &&
+                (checkUnspentChannel(channel, outPoint) == CHECKUNSPENT_SPENT) &&
+                (!channel.getFundingTxSpentBlockHash().equals(Sha256Hash.ZERO_HASH)) ) {
+            blockHash = channel.getFundingTxSpentBlockHash();
+            depth = 1;
+            logger.debug("searchOutPoint(): use spentHash");
+        } else {
+            blockHash = wak.wallet().getLastBlockSeenHash();
+            if (blockHash == null) {
+                logger.error("  searchOutPoint(): fail no blockhash");
+                return result;
+            }
         }
         logger.debug("searchOutPoint(): blockhash=" + blockHash.toString() + ", depth=" + depth);
         int blockcount = wak.wallet().getLastBlockSeenHeight();
@@ -1105,7 +1115,7 @@ public class Ptarmigan {
      * @return  CHECKUNSPENT_xxx
      */
     public int checkUnspent(byte[] peerId, byte[] txid, int vIndex) {
-        int retval;
+        int chk_un;
         TransactionOutPoint outPoint = new TransactionOutPoint(params, vIndex, Sha256Hash.wrapReversed(txid));
         logger.debug("checkUnspent(): outPoint=" + outPoint.toString());
         boolean isFundingTx = false;
@@ -1124,10 +1134,10 @@ public class Ptarmigan {
                     return CHECKUNSPENT_FAIL;
                 }
                 isFundingTx = channel.isFundingTx(outPoint);
-                retval = checkUnspentChannel(channel, outPoint);
-                if (retval != CHECKUNSPENT_FAIL) {
-                    logger.debug("checkUnspent(): from channel=" + checkUnspentString(retval));
-                    return retval;
+                chk_un = checkUnspentChannel(channel, outPoint);
+                if (chk_un != CHECKUNSPENT_FAIL) {
+                    logger.debug("checkUnspent(): from channel=" + checkUnspentString(chk_un));
+                    return chk_un;
                 }
             }
         }
@@ -1137,20 +1147,22 @@ public class Ptarmigan {
             if (ch == null) {
                 continue;
             }
-            retval = checkUnspentChannel(ch, outPoint);
-            if (retval != CHECKUNSPENT_FAIL) {
-                logger.debug("checkUnspent(): from ALL channel=" + checkUnspentString(retval));
-                return retval;
+            chk_un = checkUnspentChannel(ch, outPoint);
+            if (chk_un != CHECKUNSPENT_FAIL) {
+                logger.debug("checkUnspent(): from ALL channel=" + checkUnspentString(chk_un));
+                return chk_un;
             }
         }
 
         // search until wallet creation time
-        retval = checkUnspentFromBlock(outPoint);
+        logger.debug("  check from Block");
+        Sha256Hash[] spentBlock = new Sha256Hash[] { null };
+        chk_un = checkUnspentFromBlock(null, outPoint, null, null, spentBlock, null);
         if (isFundingTx) {
-            channel.setFundingTxSpentValue(retval);
+            channel.setFundingTxSpentValue(chk_un, spentBlock[0]);
             mapChannel.put(Hex.toHexString(channel.peerNodeId()), channel);
         }
-        return retval;
+        return chk_un;
     }
 
 
@@ -1163,22 +1175,17 @@ public class Ptarmigan {
     private int checkUnspentChannel(PtarmiganChannel channel, TransactionOutPoint outPoint) {
         if ((channel.getFundingOutpoint() != null) && channel.getFundingOutpoint().equals(outPoint)) {
             // funding_tx
-            logger.debug("checkUnspentChannel(): funding unspent=" + checkUnspentString(channel.getFundingTxUnspent()));
+            logger.debug("checkUnspentChannel(): funding unspent(cached)=" + checkUnspentString(channel.getFundingTxUnspent()));
             return channel.getFundingTxUnspent();
         } else {
             // commit_tx
             PtarmiganChannel.CommitTxid commit_tx = channel.getCommitTxid((int)outPoint.getIndex());
             if ((commit_tx != null) && (commit_tx.txid != null)) {
-                logger.debug("checkUnspentChannel(): commit_tx unspent=" + checkUnspentString(commit_tx.unspent));
+                logger.debug("checkUnspentChannel(): commit_tx unspent(cached)=" + checkUnspentString(commit_tx.unspent));
                 return commit_tx.unspent;
             }
         }
         return CHECKUNSPENT_FAIL;
-    }
-
-
-    private int checkUnspentFromBlock(TransactionOutPoint outPoint) {
-        return checkUnspentFromBlock(null, outPoint, null, null, null);
     }
 
 
@@ -1187,6 +1194,7 @@ public class Ptarmigan {
             TransactionOutPoint outPoint,
             Sha256Hash blockHash,
             Sha256Hash[] lastBlock,
+            Sha256Hash[] spentBlock,
             int[] loopDepth) {
         boolean isFundingTx = (channel != null) && channel.isFundingTx(outPoint);
         if (blockHash == null) {
@@ -1212,14 +1220,17 @@ public class Ptarmigan {
             if ((channel != null) && (channel.getShortChannelId() != null)) {
                 confHeight = channel.getShortChannelId().height + channel.getConfirmation() - 1;
                 if (confHeight > 0) {
-                    logger.debug("height: short_channel_id=" + channel.getShortChannelId().height + ", conf=" + channel.getConfirmation() + ", confHeight=" + confHeight);
+                    logger.debug("height: short_channel_id=" +
+                            channel.getShortChannelId().height +
+                            ", conf=" + channel.getConfirmation() +
+                            ", confHeight=" + confHeight);
                     depth = wak.wallet().getLastBlockSeenHeight() - confHeight + OFFSET_CHECK_UNSPENT;
                 }
             }
             logger.debug("checkUnspentFromBlock: blockHash=" + blockHash.toString());
             loopDepth[0] = depth;
         }
-        return checkUnspentFromBlock(channel, outPoint, blockHash, lastBlock, loopDepth, isFundingTx);
+        return checkUnspentFromBlock(channel, outPoint, blockHash, lastBlock, spentBlock, loopDepth, isFundingTx);
     }
 
         /** 指定したoutPointのunspentチェック
@@ -1240,6 +1251,7 @@ public class Ptarmigan {
             TransactionOutPoint outPoint,
             Sha256Hash blockHash,
             Sha256Hash[] lastBlock,
+            Sha256Hash[] spentBlock,
             int[] loopDepth,
             boolean isFundingTx) {
         logger.debug("checkUnspentFromBlock(): outPoint=" + outPoint.toString());
@@ -1300,6 +1312,9 @@ public class Ptarmigan {
                                 //logger.debug("   input:" + pnt.toString());
                                 if (pnt.equals(outPoint)) {
                                     logger.debug("checkUnspentFromBlock() ----> SPENT!");
+                                    if (spentBlock != null) {
+                                        spentBlock[0] = blockHash;
+                                    }
                                     return CHECKUNSPENT_SPENT;
                                 }
                             }
@@ -1481,16 +1496,21 @@ public class Ptarmigan {
             if (!Sha256Hash.ZERO_HASH.equals(blockHash)) {
                 Sha256Hash[] loadHash = new Sha256Hash[1];
                 Sha256Hash[] lastBlock = new Sha256Hash[1];
+                Sha256Hash[] spentBlock = new Sha256Hash[1];
                 int[] loopDepth = new int[] { 0 };
                 loadSuspendBlock(peerId, loadHash, loopDepth);
-                int chk_un = checkUnspentFromBlock(channel, fundingOutpoint, loadHash[0], lastBlock, loopDepth);
+                int chk_un = checkUnspentFromBlock(channel, fundingOutpoint, loadHash[0], lastBlock, spentBlock, loopDepth);
                 logger.debug("setChannel: checkUnspent: " + chk_un);
-                channel.setFundingTxSpentValue(chk_un);
-                if (chk_un < 0) {
-                    resultResult = false;
-                    saveSuspendBlock(peerId, lastBlock[0], loopDepth[0]);
-                } else {
-                    removeSuspendBlock(peerId);
+                channel.setFundingTxSpentValue(chk_un, spentBlock[0]);
+                switch (chk_un) {
+                    case CHECKUNSPENT_UNSPENT:
+                    case CHECKUNSPENT_SPENT:
+                        removeSuspendBlock(peerId);
+                        break;
+                    case CHECKUNSPENT_FAIL:
+                    default:
+                        resultResult = false;
+                        saveSuspendBlock(peerId, lastBlock[0], loopDepth[0]);
                 }
             } else {
                 logger.debug("setChannel: checkUnspent: SKIP");
@@ -1882,8 +1902,12 @@ public class Ptarmigan {
                 logger.debug("COINBASE_scriptChunk0opcode=" + scriptChunk0.opcode);
                 if (scriptChunk0.data != null) {
                     logger.debug("COINBASE_scriptChunk0Hex=" + Hex.toHexString(scriptChunk0.data));
-                    if (scriptChunk0.isPushData() && (scriptChunk0.data.length == 3)) {
-                        height = ((scriptChunk0.data[2] & 0xff) << 16) | ((scriptChunk0.data[1] & 0xff) << 8) | (scriptChunk0.data[0] & 0xff);
+                    if (scriptChunk0.isPushData()) {
+                        if (scriptChunk0.data.length == 3) {
+                            height = ((scriptChunk0.data[2] & 0xff) << 16) | ((scriptChunk0.data[1] & 0xff) << 8) | (scriptChunk0.data[0] & 0xff);
+                        } else if (params.getPaymentProtocolId().equals(NetworkParameters.PAYMENT_PROTOCOL_ID_REGTEST) && scriptChunk0.data.length == 2) {
+                            height = ((scriptChunk0.data[1] & 0xff) << 8) | (scriptChunk0.data[0] & 0xff);
+                        }
                         logger.debug("COINBASE_height=" + height);
                         block.verify((int) height, EnumSet.of(Block.VerifyFlag.HEIGHT_IN_COINBASE));
                         logger.debug("getHeightFromCoinbase(): verified");
