@@ -24,6 +24,7 @@ public class PtarmiganChannel {
     private CommitTxid[] commitTxids = new CommitTxid[Ptarmigan.COMMITTXID_MAX];
     private TransactionOutPoint fundingOutpoint;
     private Sha256Hash minedHash = Sha256Hash.ZERO_HASH;
+    private Sha256Hash spentHash = null;
     private Logger logger;
     //
     PtarmiganChannel(byte[] peerNodeId, ShortChannelParam shortChannelId) {
@@ -81,13 +82,16 @@ public class PtarmiganChannel {
         return (this.fundingOutpoint != null) && this.fundingOutpoint.equals(outPont);
     }
     //
-    void setFundingTxSpent() {
-        setFundingTxSpentValue(Ptarmigan.CHECKUNSPENT_SPENT);
-    }
-    //
-    void setFundingTxSpentValue(int checkUnspent) {
+    void setFundingTxSpentValue(int checkUnspent, Sha256Hash spentHash) {
         logger.debug("setFundingTxSpent(node=" + Hex.toHexString(this.peerNodeId) + ")=" + checkUnspent);
         this.fundingTxUnspent = checkUnspent;
+        if (spentHash != null) {
+            logger.debug("  spentHash=" + spentHash.toString());
+            this.spentHash = spentHash;
+        }
+    }
+    Sha256Hash getFundingTxSpentBlockHash() {
+        return this.spentHash;
     }
     //
     Sha256Hash getLastUnspentHash() {
