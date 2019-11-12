@@ -1895,28 +1895,25 @@ public class Ptarmigan {
         try {
             List<Transaction> txs = block.getTransactions();
             if ((txs != null) && txs.size() > 0 && (txs.get(0).getInputs().size() > 0)) {
-                Script scriptSig = txs.get(0).getInput(0).getScriptSig();
-                ScriptChunk scriptChunk0 = scriptSig.getChunks().get(0);
-                logger.debug("COINBASE_scriptChunk0=" + scriptChunk0.toString());
-                logger.debug("COINBASE_scriptChunk0opcode=" + scriptChunk0.opcode);
-                if (scriptChunk0.data != null) {
-                    logger.debug("COINBASE_scriptChunk0Hex=" + Hex.toHexString(scriptChunk0.data));
-                    if (scriptChunk0.isPushData()) {
-                        if (scriptChunk0.data.length == 3) {
-                            height = ((scriptChunk0.data[2] & 0xff) << 16) | ((scriptChunk0.data[1] & 0xff) << 8) | (scriptChunk0.data[0] & 0xff);
-                        } else if (params.getPaymentProtocolId().equals(NetworkParameters.PAYMENT_PROTOCOL_ID_REGTEST) && scriptChunk0.data.length == 2) {
-                            height = ((scriptChunk0.data[1] & 0xff) << 8) | (scriptChunk0.data[0] & 0xff);
-                        }
-                        logger.debug("COINBASE_height=" + height);
-                        block.verify((int) height, EnumSet.of(Block.VerifyFlag.HEIGHT_IN_COINBASE));
-                        logger.debug("getHeightFromCoinbase(): verified");
+                byte[] scriptSigBytes = txs.get(0).getInput(0).getScriptBytes();
+                logger.debug("COINBASE_scriptBytes=" + Hex.toHexString(scriptSigBytes));
+                if (scriptSigBytes.length >= 4) {
+                    if (scriptSigBytes[0] == 0x03) {
+                        height = ((scriptSigBytes[3] & 0xff) << 16) | ((scriptSigBytes[2] & 0xff) << 8) | (scriptSigBytes[1] & 0xff);
+                    } else if (params.getPaymentProtocolId().equals(NetworkParameters.PAYMENT_PROTOCOL_ID_REGTEST) && (scriptSigBytes[0] == 0x02)) {
+                        height = ((scriptSigBytes[2] & 0xff) << 8) | (scriptSigBytes[1] & 0xff);
+                    } else {
+                        logger.error("COINBASE_height length mismatch");
                     }
+                    logger.debug("COINBASE_height=" + height);
+                    block.verify((int) height, EnumSet.of(Block.VerifyFlag.HEIGHT_IN_COINBASE));
+                    logger.debug("getHeightFromCoinbase(): verified");
                 } else {
-                    logger.debug("COINBASE_scriptChunk0Hex=null");
+                    logger.error("COINBASE_script: length < 4");
                 }
             }
         } catch (Exception e) {
-            logger.error("getHeightFromCoinbase(): fail");
+            logger.error("getHeightFromCoinbase(): fail: " + getStackTrace(e));
         }
 
         return height;
