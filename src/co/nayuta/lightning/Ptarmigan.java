@@ -159,7 +159,7 @@ public class Ptarmigan {
         params = NetworkParameters.fromPmtProtocolID(pmtProtocolId);
         if (params == null) {
             // Error
-            logger.error("ERROR: Invalid PmtProtocolID -> $pmtProtocolId");
+            logger.error("ERROR: Invalid PmtProtocolID: " + pmtProtocolId);
             return SPV_START_ERR;
         }
 
